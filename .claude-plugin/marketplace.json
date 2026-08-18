@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "techlead",
+  "owner": {
+    "name": "Tech Lead Agent contributors"
+  },
+  "metadata": {
+    "description": "Local-first technical leadership workflows for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "techlead",
+      "source": "./plugins/claude-techlead",
+      "description": "Maintain durable project intent, work graphs, evidence, verification, and pivots.",
+      "category": "development",
+      "tags": ["engineering", "planning", "agents"]
+    }
+  ]
+}

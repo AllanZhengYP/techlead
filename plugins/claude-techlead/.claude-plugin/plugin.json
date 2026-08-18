@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "techlead",
+  "displayName": "Tech Lead Agent",
+  "version": "0.1.0",
+  "description": "Local-first technical leadership for long-running engineering projects.",
+  "author": {
+    "name": "Tech Lead Agent contributors",
+    "url": "https://github.com/AllanZhengYP/techlead"
+  },
+  "homepage": "https://github.com/AllanZhengYP/techlead",
+  "repository": "https://github.com/AllanZhengYP/techlead",
+  "keywords": ["tech-lead", "project-management", "agents", "engineering"]
+}

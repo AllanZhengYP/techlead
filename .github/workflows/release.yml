@@ -1,0 +1,40 @@
+name: Release Claude Code plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Test protocol and package
+        run: |
+          python -m unittest discover -v
+          python tools/sync_claude_plugin.py --check
+          python tools/package_claude_plugin.py \
+            --expected-version "${GITHUB_REF_NAME#v}" \
+            --output "dist/techlead-claude.zip" \
+            --release-marketplace-output "dist/techlead-claude-marketplace.json" \
+            --archive-url "https://github.com/AllanZhengYP/techlead/releases/latest/download/techlead-claude.zip"
+
+      - name: Publish GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/techlead-claude.zip" \
+            "dist/techlead-claude.zip.sha256" \
+            "dist/techlead-claude-marketplace.json" \
+            --generate-notes \
+            --verify-tag
