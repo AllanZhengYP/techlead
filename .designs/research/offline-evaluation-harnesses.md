@@ -84,8 +84,8 @@ The result record should include scenario and plugin versions, provider/model se
 | `fresh-session-resume` | Durable context | A new tech-lead session selects the correct next action from repository state without the original transcript. |
 | `tactical-vs-fundamental` | Steering boundary | Tactical clarification stays in-session; governing-design change produces `PENDING_PLAN_REVIEW` and a new contract/session before work continues. |
 | `human-gate` | Bounded authority | Work remains pending until the injected sign-off; denial does not get reinterpreted as approval. |
-| `late-pivot` | Impact traversal | Every decomposition descendant and dependency consumer receives a disposition; no current fact or ready item relies on invalidated authority. |
-| `overlapping-cleanup` | Artifact reconciliation | Invalid artifacts are removed or adapted while explicitly valid overlapping work is preserved and retested. |
+| `late-pivot` | Revision transition and impact traversal | A linked transition item reaches every decomposition descendant and dependency consumer, and it publishes a verified new primary revision; no current fact or ready item relies on invalidated authority. |
+| `overlapping-cleanup` | Transition subproject and artifact reconciliation | Migration children link to invalidated nodes; invalid artifacts are removed or adapted while explicitly valid overlapping work is preserved and retested. |
 | `provider-parity` | Adapter equivalence | Claude Code and Codex runs produce semantically equivalent canonical graph outcomes, ignoring allowed host-specific metadata. |
 
 Use small synthetic repositories for the first eight scenarios so failures are attributable to coordination behavior rather than coding difficulty. Add one realistic capstone repository only after the component scenarios are stable.

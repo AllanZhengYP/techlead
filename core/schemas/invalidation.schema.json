@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Historical invalidation",
+  "type": "object",
+  "required": [
+    "protocol_version", "kind", "id", "work_item", "invalidated_revision",
+    "transition_item", "invalidated_facts", "affected_artifacts",
+    "migration_items"
+  ],
+  "properties": {
+    "protocol_version": {"const": "1.0"},
+    "kind": {"const": "invalidation"},
+    "id": {"type": "string", "pattern": "^INV-[0-9]+$"},
+    "work_item": {"type": "string", "pattern": "^WI-[0-9]+$"},
+    "invalidated_revision": {"type": "string", "pattern": "^r[1-9][0-9]*$"},
+    "transition_item": {"type": "string", "pattern": "^WI-[0-9]+$"},
+    "invalidated_facts": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+    "affected_artifacts": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "migration_items": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]+$"}, "uniqueItems": true}
+  },
+  "additionalProperties": false
+}

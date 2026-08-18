@@ -346,20 +346,25 @@ flowchart LR
 
 ## Pivot and reconcile
 
-A resolution is authoritative under the assumptions and project context recorded when the work item was resolved, but it is not immutable truth. Later evidence or human direction may pivot a previously resolved design decision, invalidate a foundational assumption, or replace a project constraint after substantial dependent work has already accumulated.
+A resolution is authoritative under the assumptions and project context recorded for that node revision, but it is not immutable truth. Later evidence or human direction may require a new revision of a previously resolved design after substantial dependent work has accumulated.
 
-An **invalidated work item** is an active or resolved graph node whose contract, result, or supporting evidence is no longer applicable to the current project. Invalidation is not deletion and does not rewrite history. The node remains in the graph with the invalidating decision, reason, time, replacement if any, and the scope of evidence and artifacts that can no longer be trusted.
+A pivot normally preserves the primary node's stable identity. The tech lead marks that node `REVISING`, suspends the old revision's authority for new dependency releases, and creates an ordinary **revision-transition work item** pointing back to it. That item receives its own worker assignment and session just like any other node. Its contract names the target node, its current revision, the intended new design, the affected graph neighborhood, and the verification required to activate the next revision. It records the migration work rather than hiding that work inside a metadata edit.
 
-When a pivot is accepted, the tech lead performs an impact traversal before normal downstream work continues:
+The revision-transition item can be decomposed like any other work item. Its children may investigate impact, migrate implementation, adapt interfaces, or reconcile repository artifacts. They can link directly to affected or invalidated nodes so the transition retains provenance from obsolete work to the change that handled it. The transition is complete only when its own acceptance criteria and all required child work pass; its resolution then creates and activates the primary node's next immutable revision. The primary node returns to `RESOLVED`, and the previous revision remains inspectable as superseded history.
 
-1. Record the pivot as a new decision or replacement work item and identify the resolved node or assumption it supersedes.
-2. Pause active assignments whose governing context may have changed.
-3. Traverse decomposition descendants, dependency dependents, and related-context or artifact links. Children are not invalidated merely because their parent changed, and non-child dependents are not overlooked merely because they live on another branch.
-4. Classify each affected node as still applicable, revision required, invalidated, or unresolved pending investigation. Record the rationale and the exact dependency being reassessed.
-5. Continue the traversal through every newly invalidated node until no unreviewed downstream consumer remains.
-6. Construct replacement or reconciliation work items, rebuild valid dependency edges, and repopulate the frontier from the resulting valid graph.
+An **invalidated work item** is a descendant or consumer whose own result is no longer applicable under the target revision. Invalidation is not deletion and does not rewrite history. The node remains in the graph with the reason, the primary revision transition that invalidated it, the scope of facts and artifacts that lost authority, and links to migration children that consumed or reconciled its work.
 
-The pivot traversal crosses both decomposition and dependency edges. The before-and-after snapshots make clear that descendants are reviewed individually: one remains valid, another is invalidated, and a non-child dependency consumer also requires review.
+When a pivot is accepted, the tech lead performs an impact traversal through the revision-transition work item:
+
+1. Record the pivot decision, mark the primary node `REVISING`, and create a transition item that targets its current revision.
+2. Pause assignments whose governing context may have changed and block new work from relying on the superseded revision.
+3. Traverse decomposition descendants, dependency consumers, and related-context or artifact links. Children are not invalidated merely because the primary node changed, and non-child consumers are not overlooked merely because they live on another branch.
+4. Classify each affected node as reaffirmed for the target design, revision required, invalidated, or pending investigation. Record the rationale and exact relationship being reassessed.
+5. Decompose the transition item when investigation, implementation migration, or artifact reconciliation requires independently verifiable work. Link those children to the affected nodes they handle.
+6. Continue traversal through each newly invalidated node until no unreviewed downstream consumer remains.
+7. Verify the reconstructed graph and workspace, resolve the transition item, and atomically publish the next revision of the primary node.
+
+The traversal crosses both decomposition and dependency edges. The transition work makes the change itself visible in the same graph: one descendant can be reaffirmed, another invalidated and consumed by a migration child, and a non-child dependency consumer can require revision.
 
 ```mermaid
 flowchart LR
@@ -376,33 +381,36 @@ flowchart LR
         b210 -->|"dependency"| b220
     end
 
-    action{{"DEC-12 PIVOT<br/>Shared store required<br/>Traverse impact"}}
+    action{{"DEC-12 PIVOT<br/>Create WI-300 revision transition<br/>for WI-110 r1 → r2"}}
 
-    subgraph after["After · graph reconciled around the pivot"]
+    subgraph after["During transition · target revision not yet active"]
         direction TB
-        a110["WI-110 [INVALIDATED]<br/>Use local cache"]
-        a120["WI-120 [RESOLVED · REAFFIRMED]<br/>Serialization format"]
+        a110["WI-110 [REVISING]<br/>r1 local cache → proposed r2 shared store"]
+        a300["WI-300 [DECOMPOSED]<br/>Transition WI-110 to r2"]
+        a120["WI-120 [RESOLVED · REAFFIRMED]<br/>Serialization format remains valid"]
         a130["WI-130 [INVALIDATED]<br/>Local-cache adapter"]
         a210["WI-210 [PENDING_PLAN_REVIEW]<br/>Sync pipeline"]
         a220["WI-220 [PENDING_INVESTIGATION]<br/>Performance tests"]
-        a310["WI-310 [READY]<br/>Shared-store adapter"]
-        a320["WI-320 [READY]<br/>Reconcile repository artifacts"]
-        a110 -->|"reviewed child"| a120
+        a310["WI-310 [READY]<br/>Implement shared-store adapter"]
+        a320["WI-320 [READY]<br/>Migrate invalidated artifacts"]
+        a300 -->|"revises r1"| a110
+        a300 -->|"transition child"| a310
+        a300 -->|"transition child"| a320
+        a110 -->|"reaffirmed child"| a120
         a110 -->|"invalidated child"| a130
         a110 -->|"affected consumer"| a210
         a210 -->|"validity unresolved"| a220
-        a310 -->|"replacement target"| a320
-        a130 -->|"artifacts to remove or adapt"| a320
+        a130 -->|"invalidated work consumed by migration"| a320
     end
 
     b110 --> action --> a110
 ```
 
-A still-applicable node is explicitly reaffirmed against the new decision. A node requiring revision enters plan review. An invalidated active assignment stops; an invalidated resolved node loses its authority as a current dependency even though its historical evidence remains inspectable. Any new or resumed assignment whose contract changed starts in a fresh worker session.
+A still-applicable node is explicitly reaffirmed against the target design. A node requiring its own revision enters plan review and may receive a nested revision-transition item. An invalidated active assignment stops; an invalidated resolved node loses its authority as a current dependency even though its historical evidence remains inspectable. Any assignment whose contract changed starts in a fresh worker session.
 
-Logical reconciliation and workspace reconciliation are separate. The tech lead creates one or more explicit cleanup work items when invalidated nodes left code, tests, configuration, documentation, migrations, or other artifacts in the repository. A cleanup item inventories the affected artifacts and valid overlapping changes, then chooses among selective reversion, forward adaptation, replacement, or reconstruction. It must not blindly restore an old repository snapshot, because later valid work may share the same files or depend on unaffected parts of an invalidated change.
+Logical reconciliation and workspace reconciliation remain distinct responsibilities, but both belong to the revision-transition subproject. A migration child inventories affected artifacts and valid overlapping changes, then chooses among selective reversion, forward adaptation, replacement, or reconstruction. It must not blindly restore an old repository snapshot, because later valid work may share the same files or depend on unaffected portions of an invalidated node.
 
-The pivot is reconciled only when every reachable affected node has a recorded disposition, current overview claims no longer rely on invalidated resolutions, the frontier contains the valid replacement and cleanup work, and the resulting workspace is verified against the reconstructed graph. Until then, work that depends on the pivoted decision remains blocked.
+The pivot is reconciled only when every reachable affected node has a recorded disposition, current overview claims no longer rely on invalidated resolutions, the transition subproject is resolved, and the resulting workspace is verified against the reconstructed graph. Only then is the new primary revision authoritative and eligible to release dependents.
 
 ## Resume
 
@@ -440,14 +448,15 @@ work-items/<id>/
 │   └── <attempt>.md
 ├── verifications/
 │   └── <verification>.md
+├── resolutions/
+│   └── <revision>.md        # present for each resolved revision
 ├── evidence/                 # optional non-code evidence
-├── RESOLUTION.md             # present after resolution
 └── INVALIDATION.md           # present if later invalidated
 ```
 
-`WORK.md` is the stable entry point. It contains the work-item ID and title, current state and revision, objective, parent or decomposition links, dependencies and dependents, related-context and replacement links, current local assumptions and risks, affected artifacts, and pointers to the current contract and latest result. Relationship backlinks are updated together and may be checked mechanically so impact traversal does not require guessing which nodes consumed a resolution.
+`WORK.md` is the stable entry point. It contains the work-item ID and title, current state and active revision, objective, parent or decomposition links, dependencies and dependents, related-context and revision-transition links, current local assumptions and risks, affected artifacts, and pointers to the active contract and latest result. A transition item additionally records its target node and source revision. Relationship backlinks are updated together and may be checked mechanically so impact traversal does not require guessing which nodes consumed a resolution.
 
-Each file under `revisions/` is an immutable assignment-contract snapshot containing scope, context projection, acceptance criteria, verification requirements, and the governing assumptions to which a worker session was bound. An attempt records the session, worktree or Git revisions, result summary, discoveries, and submitted evidence. Verification records criterion-level findings. `RESOLUTION.md` states what was established, which evidence supports it, what it consumed and produced, and which artifacts or decisions it affects. `INVALIDATION.md` records the later pivot, lost authority, affected facts and artifacts, and replacement or cleanup items without modifying the historical resolution.
+Each file under `revisions/` is an immutable node and assignment-contract snapshot containing objective, scope, context projection, acceptance criteria, verification requirements, and the governing assumptions to which a worker session was bound. Attempts and verifications name the exact revision they evaluate. `resolutions/<revision>.md` states what that revision established, which evidence supports it, what it consumed and produced, and which artifacts or decisions it affects. Multiple resolved revisions can therefore coexist without rewriting history. `INVALIDATION.md` records terminal loss of authority for the node, affected facts and artifacts, the governing primary-node transition, and migration children without modifying historical revisions or resolutions. A revision-transition item uses the same directory shape; its `WORK.md` names `target_node` and `from_revision`, and its resolution names the newly published target revision.
 
 The optional `evidence/` directory is for durable evidence that does not naturally live in Git history or another repository artifact, such as benchmark output or a research comparison. Large generated output and chat transcripts are referenced rather than copied by default.
 
@@ -459,11 +468,11 @@ A work item does not receive a separate `RISKS.md` by default. Its `WORK.md` and
 
 `OVERVIEW.md` and `FRONTIER.md` remain separate even though a tech lead normally loads both. They have different truth semantics and update rates: the overview contains established knowledge and changes only when evidence is accepted or superseded, while the frontier contains provisional work and may change after every planning step. Keeping them separate prevents an active hypothesis from appearing to be a resolved fact and allows later sessions to load or refresh them independently.
 
-The work-item directories are the source of truth for graph history. Every node receives its own stable ID directory under `work-items/`; decomposition, dependency, revision, replacement, and related-context relationships are recorded as links between IDs. A flat ID namespace permits graph relationships that would be awkward or misleading as nested directories. The summaries are tech-lead-maintained projections of this canonical graph, not substitutes for it.
+The work-item directories are the source of truth for graph history. Every node receives its own stable ID directory under `work-items/`; decomposition, dependency, revision-transition, replacement, and related-context relationships are recorded as links between IDs. A flat ID namespace permits transition subprojects and links from migration children to invalidated nodes without forcing them into a misleading directory hierarchy. The summaries are tech-lead-maintained projections of this canonical graph, not substitutes for it.
 
-When a work item is resolved, `work-items/<id>/RESOLUTION.md` records the supported findings, evidence, consumed resolutions and assumptions, affected artifacts, and Git provenance. The tech lead updates `OVERVIEW.md` with the resulting project facts and links each claim to the responsible resolution file. If later work invalidates or supersedes a fact, the overview removes it from the current synthesis or marks it as no longer valid, points to the pivot and replacement, and retains the earlier basis in the historical resolution index. Invalidated facts must not remain phrased as current project truth.
+When a work-item revision is resolved, `work-items/<id>/resolutions/<revision>.md` records the supported findings, evidence, consumed resolutions and assumptions, affected artifacts, and Git provenance. The tech lead updates `OVERVIEW.md` with the resulting project facts and links each claim to the responsible revision-specific resolution. If later work invalidates or supersedes a fact, the overview removes it from the current synthesis or marks it as no longer valid, points to the primary node's revision transition and active revision, and retains the earlier basis in the historical resolution index. Invalidated facts must not remain phrased as current project truth.
 
-`FRONTIER.md` answers what is happening now: the current goals in motion, their status, immediate dependencies, blockers, revisions under review, pivot impact traversals, cleanup work, and next decisions or actions. Resolved branches fall out of the frontier after their conclusions are incorporated into the overview, but reappear when a pivot puts their validity or artifacts under reconciliation. The full graph therefore may grow large while both summaries remain suitable for a fresh tech-lead context.
+`FRONTIER.md` answers what is happening now: the current goals in motion, their status, immediate dependencies, blockers, revisions under review, revision-transition subprojects, and next decisions or actions. Resolved branches fall out of the frontier after their conclusions are incorporated into the overview, but reappear when a transition puts their validity or artifacts under reconciliation. The full graph therefore may grow large while both summaries remain suitable for a fresh tech-lead context.
 
 Git provides the chronological activity history and ties implementation and project-state changes to concrete revisions. Separate activity or transcript logs should not be added unless the resumption experiment shows that Git plus these records is insufficient. Chat transcripts are supporting context, not a source of truth.
 
@@ -493,15 +502,16 @@ The PoC only needs a small set of states. The before-and-after workflow diagrams
 | `NEEDS_CHANGES` | Verification found a bounded correction. |
 | `PENDING_HUMAN` | An explicit human decision or sign-off is required. |
 | `PENDING_PLAN_REVIEW` | Governing context may have changed and the graph must be reviewed. |
+| `REVISING` | A resolved primary node has suspended its current revision while a linked transition item produces and verifies the next revision. |
 | `RESOLVED` | Acceptance criteria passed and the resolution may support dependents. |
 | `REPLACED` | Another node now represents the intended work. |
 | `INVALIDATED` | The node remains historical but no longer has authority for current work. |
 
 A decomposed parent remains unresolved while its children are active. Resolved child items provide evidence toward the parent's objective, but the parent becomes resolved only after the tech lead synthesizes their resolutions and verifies the parent's own acceptance criteria. This preserves the reasoning path from an early rough item to the concrete work that ultimately resolved it.
 
-A work item whose objective or acceptance criteria materially changes gets a new revision. When a revision would obscure a fundamentally different objective, the tech lead creates a replacement item and links it to the superseded node. A change with broader impact also triggers review of the charter, overview, frontier, risks, dependencies, and other assignment contracts. Historical results remain attached to the revision that produced them.
+A work item whose design, objective, or acceptance criteria materially changes gets a new revision. If that node was already resolved or has dependent work, a linked revision-transition item performs the change and publishes the new revision only after verification. The transition item may be decomposed and its children may link to invalidated descendants whose artifacts or facts they migrate. When a revision would obscure a fundamentally different identity or outcome, the tech lead may still create a replacement item, but ordinary pivots preserve the primary node ID. A broader change also triggers review of the charter, overview, frontier, risks, dependencies, and other assignment contracts. Historical results remain attached to the revision that produced them.
 
-`INVALIDATED` is a historical terminal state: the node does not return to ready or resolved. Still-useful portions are carried into explicitly linked replacement or cleanup items. This prevents a once-invalid node from silently regaining authority without a new contract and verification record.
+`INVALIDATED` is a historical terminal state for a node whose own outcome no longer applies: it does not return to ready or resolved. Still-useful portions are consumed by explicitly linked revision-transition children or, for a genuinely different outcome, a replacement item. The pivoted primary node itself normally uses `REVISING` and gains a new revision instead of becoming invalidated.
 
 ## Portable agent roles and repository context
 
@@ -563,7 +573,7 @@ The PoC should prove that the complete workflow is useful on one real local proj
 
 - One tech lead agent operating across replaceable sessions.
 
-- An incrementally expanded work graph stored as stable work-item-ID directories, with decomposition, dependency, revision, replacement, and related-context links.
+- An incrementally expanded work graph stored as stable work-item-ID directories, with decomposition, dependency, revision-transition, replacement, and related-context links.
 
 - A separate resolved overview and active frontier, both maintained by the tech lead, alongside an explicit risk and research log.
 
@@ -585,9 +595,9 @@ The PoC should prove that the complete workflow is useful on one real local proj
 
 - A fundamental worker-level divergence that triggers pending state, fresh sub-tech-lead review, and global plan reconciliation.
 
-- A pivot that invalidates a previously resolved work item after both resolved and active work have depended on it.
+- A pivot that moves a previously resolved primary node to a new revision after both resolved and active work have depended on its earlier revision.
 
-- An impact traversal that classifies affected descendants and dependents, reconstructs the valid graph, and creates explicit workspace-cleanup work.
+- A revision-transition item that traverses affected descendants and consumers, decomposes into migration work, links to invalidated subnodes, reconstructs the valid graph, and publishes the primary node's new revision.
 
 - Restarting the tech lead session and resuming from repository state.
 
@@ -611,7 +621,7 @@ The PoC should prove that the complete workflow is useful on one real local proj
 
 ## Demonstration scenario
 
-Use a real change that begins as a few rough work items, expands at least one of them into concrete children, and includes architectural or solution uncertainty. Research prior art and test one important feasibility assumption before committing to the main implementation. Exercise worker-attested evidence, a deterministic check, independent agent review, and an explicit human sign-off across the resulting acceptance criteria. After the governing decision is resolved and at least one dependent item has also resolved while another is active, introduce evidence or human direction that pivots that decision. The system pauses affected work, reviews both descendants and dependency consumers, reaffirms valid nodes, invalidates obsolete nodes, constructs replacements, and creates a verified cleanup assignment for invalidated repository artifacts. Complete the project without relying on the original tech-lead conversation or manually reconstructing historical context.
+Use a real change that begins as a few rough work items, expands at least one of them into concrete children, and includes architectural or solution uncertainty. Research prior art and test one important feasibility assumption before committing to the main implementation. Exercise worker-attested evidence, a deterministic check, independent agent review, and an explicit human sign-off across the resulting acceptance criteria. After the governing primary node is resolved and at least one consumer has also resolved while another is active, introduce evidence or human direction that pivots its design. The system marks the primary node `REVISING`, creates a revision-transition item, pauses affected work, reviews descendants and dependency consumers, reaffirms valid nodes, invalidates obsolete nodes, and decomposes the transition into verified migration and artifact-reconciliation work linked to those obsolete nodes. Completing the transition publishes the primary node's next revision. Complete the project without relying on the original tech-lead conversation or manually reconstructing historical context.
 
 ## Exit criteria
 
@@ -629,11 +639,11 @@ Use a real change that begins as a few rough work items, expands at least one of
 
 - At least one work item is revised, decomposed, or replaced in response to new evidence.
 
-- A pivot of a resolved node reaches every decomposition descendant and dependency consumer, and each affected node records a still-applicable, revision-required, invalidated, or pending-investigation disposition.
+- A pivot of a resolved primary node creates a linked revision-transition item that reaches every decomposition descendant and dependency consumer; each affected node records a reaffirmed, revision-required, invalidated, or pending-investigation disposition.
 
 - No current overview claim or ready dependency relies on an invalidated resolution.
 
-- Workspace reconciliation removes or adapts invalidated artifacts while preserving overlapping valid work, and the reconstructed result passes its verification plan.
+- The transition subproject removes or adapts invalidated artifacts while preserving overlapping valid work; after verification, its resolution publishes the primary node's next revision.
 
 - An instruction that changes a worker's governing design or fundamental assumptions cannot silently alter its contract: the assignment pauses, a fresh sub-tech-lead reviews the global impact, and all affected graph nodes are updated together.
 

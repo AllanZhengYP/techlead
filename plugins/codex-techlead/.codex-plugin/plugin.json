@@ -1,0 +1,22 @@
+{
+  "name": "codex-techlead",
+  "version": "0.1.0",
+  "description": "Local-first technical leadership for long-running engineering projects.",
+  "author": {
+    "name": "Tech Lead Agent contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Tech Lead Agent",
+    "shortDescription": "Lead durable, evidence-backed engineering work.",
+    "longDescription": "Maintain a project charter, work graph, evidence, verification, and pivot history while Codex workers implement bounded assignments.",
+    "developerName": "Tech Lead Agent contributors",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Initialize this repository as a tech-led project.",
+      "Resume the project and recommend the next action.",
+      "Validate the repository's tech-lead state."
+    ]
+  }
+}

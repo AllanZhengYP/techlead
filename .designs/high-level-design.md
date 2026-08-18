@@ -61,7 +61,7 @@ Each plugin provides the same conceptual entry points, even if their host-specif
 - **Initialize or adopt a project:** create or validate `.techlead/` state from the user's goal and existing repository.
 - **Lead or resume a project:** load the charter, overview, and frontier; select and advance the next graph action.
 - **Inspect status:** explain established knowledge, active work, blockers, risks, and the next recommended action.
-- **Reconcile a pivot:** traverse affected graph nodes, update validity, and create replacement or cleanup work.
+- **Reconcile a pivot:** create a revision-transition work item for the pivoted primary node, traverse affected graph nodes, and execute the migration as an ordinary decomposable subproject that publishes the primary node's next revision.
 - **Validate state:** mechanically check record shape, IDs, graph links, backlinks, and references.
 
 The first four are agent skills requiring judgment. State validation is deterministic local code. The helper may edit files only when invoked for a specific state transition authorized by the active tech lead; it does not independently schedule work or decide project meaning.
@@ -141,14 +141,14 @@ The portable interaction path is through the main tech-lead session: it relays a
 
 The global tech lead maps each acceptance criterion to worker evidence, a deterministic check, a fresh verifier, or human sign-off. Deterministic checks run through native shell and repository tools. Independent review uses a fresh native agent context. Human sign-off uses the harness's ordinary interaction channel.
 
-Only the tech lead writes `RESOLUTION.md`, updates the evidence-backed overview, and releases dependency edges after all required verification passes.
+Only the tech lead writes a revision-specific resolution under `resolutions/`, updates the evidence-backed overview, and releases dependency edges after all required verification passes.
 
 ### Steer, diverge, or pivot
 
 - Tactical steering stays in the current worker thread when the assignment contract is unchanged.
 - Fundamental divergence stops affected work and starts a fresh sub-tech-lead context with the full relevant project view.
 - A changed contract starts a fresh worker context; unchanged contracts may resume their existing sessions.
-- A pivot triggers graph impact traversal and workspace reconciliation through normal tech-lead and worker assignments rather than a special external runtime.
+- A pivot creates a normal revision-transition work item pointing to the primary node and its current revision. That item may decompose into impact-analysis, implementation-migration, and artifact-reconciliation children, including children linked to invalidated descendants. Resolving the transition publishes the primary node's next revision; no special external runtime is involved.
 
 ## 6. Provider adapters
 
@@ -181,7 +181,7 @@ Provider parity means equivalent outcomes, not identical files or prompts. Both 
 - immutable assignment revisions;
 - context-projection rules;
 - verification authority;
-- divergence, invalidation, and pivot behavior;
+- divergence, node revision transitions, descendant invalidation, and pivot behavior;
 - role result shapes.
 
 Provider-specific behavior is allowed only for invocation, agent configuration, tool and permission surfaces, worktree mechanics, and user-interface affordances.
