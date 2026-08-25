@@ -102,11 +102,61 @@ Additional invariants include:
 - a `READY` item has only `RESOLVED` dependencies;
 - a `DECOMPOSED` item has at least one child;
 - an active assignment points to a contract for its active revision;
+- `active_session` is non-null only when state is `IN_PROGRESS` or `VERIFYING`;
 - a `RESOLVED` item has a resolution for its active revision;
 - an `INVALIDATED` item has `INVALIDATION.md`;
 - a `REVISING` item names at least one transition item; and
 - a transition item sets both `target_node` and `from_revision`, while its
   target lists it in `revision_transitions`.
+
+## Session recording and human attachment
+
+When the tech lead delegates work to a worker or verifier, the harness returns
+an opaque session identifier (e.g. a Claude conversation ID or Codex session
+ID). The tech lead records this identifier immediately in the work item's
+`active_session` field so a human operator can locate and attach to the live
+agent session without waiting for completion.
+
+### Lifecycle
+
+1. **Set on delegation.** When the harness spawns a worker or verifier agent,
+   record the returned session identifier in `WORK.md` frontmatter as
+   `active_session`. The work item transitions to `IN_PROGRESS` (worker) or
+   `VERIFYING` (verifier) at the same time.
+2. **Cleared on completion.** When the agent returns its result (success,
+   failure, or divergence), the tech lead sets `active_session` to `null` and
+   records the final session reference in the immutable result envelope
+   (`session_ref` for worker results, `verifier_ref` for verifications).
+3. **Preserved on resumption.** If the harness supports session resumption and
+   the contract has not changed, `active_session` keeps its value across tech
+   lead session boundaries so that a new tech lead session can still direct a
+   human to the ongoing agent.
+
+### Human attachment
+
+The `active_session` value is sufficient for a human to locate the live agent
+conversation in the host platform (Claude or Codex). The human may:
+
+- Observe progress and intermediate reasoning.
+- Provide tactical steering that does not change the assignment contract.
+- Answer clarifying questions the worker would otherwise block on.
+
+If the human's input changes governing design, acceptance criteria, or
+assumptions, the worker must treat it as divergence and return
+`PENDING_PLAN_REVIEW` per its role contract. The session identifier remains
+valid for the lifetime of the agent context regardless of outcome.
+
+### Result envelopes
+
+The final session reference is additionally persisted in the immutable result:
+
+- `session_ref` in `worker_result` — links the completed attempt to its
+  conversation for post-hoc audit and potential resumption.
+- `verifier_ref` in `verification` — links the completed evaluation to its
+  conversation.
+
+These fields are nullable. A `null` value indicates the harness did not provide
+a resumable session reference.
 
 ## Assignment contracts and role results
 

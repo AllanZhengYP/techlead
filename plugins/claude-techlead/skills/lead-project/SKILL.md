@@ -25,10 +25,19 @@ coherence, not work-item throughput.
 6. Delegate at most one `READY` item at a time to the `techlead:worker` agent.
    Pass its exact contract, repository root or worktree, relevant charter
    constraints, global risks, required resolved facts, and frontier neighbors.
-7. Treat a worker's `SUBMITTED` result as ready for review. Map every criterion
-   to its required worker evidence, deterministic check, `techlead:verifier`
-   review, or explicit human sign-off. Never weaken the method after seeing the
-   result.
+   When the harness returns the spawned session identifier, immediately write it
+   to the work item's `active_session` field in `WORK.md` and transition the
+   item to `IN_PROGRESS`. Report the session identifier to the human so they
+   can attach to the worker if needed.
+7. Treat a worker's `SUBMITTED` result as ready for review. Clear
+   `active_session` to `null` and persist the worker's `session_ref` in the
+   immutable attempt record. Map every criterion to its required worker
+   evidence, deterministic check, `techlead:verifier` review, or explicit human
+   sign-off. When spawning a verifier, record its harness session identifier in
+   `active_session` (transitioning the item to `VERIFYING`) and report it to
+   the human. Clear `active_session` again when the verifier returns and persist
+   `verifier_ref` in the immutable verification record. Never weaken the method
+   after seeing the result.
 8. Only after every method passes, write the revision-specific resolution,
    update overview facts and indexes, release dependencies, and refresh the
    frontier as one coherent graph action.

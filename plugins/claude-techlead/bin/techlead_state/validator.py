@@ -553,6 +553,10 @@ def _validate_work_lifecycle(
         if contract and (contract.data.get("work_item"), contract.data.get("revision")) != (item_id, revision):
             report.add("reference.mismatch", "active_contract does not match the active work-item revision", record.path)
 
+        active_session = data.get("active_session")
+        if active_session is not None and state not in ("IN_PROGRESS", "VERIFYING"):
+            report.add("lifecycle.session", f"active_session must be null when state is {state}", record.path)
+
         attempt = _resolve_item_pointer(record, data.get("latest_attempt"), "attempts", report)
         if attempt and attempt.data.get("id") not in attempts:
             report.add("reference.mismatch", "latest_attempt does not reference a known attempt", record.path)

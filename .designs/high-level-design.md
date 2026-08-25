@@ -110,6 +110,8 @@ The plugins should use host capabilities instead of reproducing them:
 | Human checkpoints | Identify semantic uncertainty or explicit sign-off requirements. | Pause, ask, display the question, and resume. |
 | Worker interaction | Decide whether a question is tactical input or contract-changing divergence. | Mediate through the parent, or expose attach/steer controls when the host supports them. |
 | Session continuity | Record contract revision and opaque session reference. | Preserve and resume an unchanged session when supported. |
+| Session identity | Record the harness-returned session ID in `active_session` at spawn time; report it to the human for live attachment. | Return an opaque, stable session identifier when spawning an agent context. |
+| Human attachment | Identify which work item has an active session; relay the session ID to the human on request. | Expose attach/steer controls when the host supports live session joining (e.g. Claude conversation URL, Codex session link). |
 | Durable memory | Maintain `.techlead/` records and evidence links. | Preserve ordinary repository files and Git history. |
 
 This boundary keeps provider adapters thin. The project does not parse model transcripts, simulate a message loop, maintain its own approval UI, or infer completion from process exit alone.
@@ -130,22 +132,28 @@ The PoC topology is deliberately small: one interactive tech-lead session and at
 1. The tech lead selects one `READY` work item.
 2. It creates an immutable assignment-contract revision and a context projection.
 3. It asks the harness to start a fresh native worker context, optionally isolated in a worktree.
-4. The worker uses native repository tools, test execution, progress reporting, permission prompts, and human interaction.
-5. The harness returns the worker's result to the parent; the durable attempt record links the result to its session, commits, artifacts, and evidence.
+4. The harness returns the spawned session identifier. The tech lead records it
+   in the work item's `active_session` field and transitions the item to
+   `IN_PROGRESS`. The tech lead reports the session identifier to the human so
+   they can attach to the worker directly if the host supports it.
+5. The worker uses native repository tools, test execution, progress reporting, permission prompts, and human interaction.
+6. The harness returns the worker's result to the parent; the durable attempt record links the result to its session, commits, artifacts, and evidence. The tech lead clears `active_session` and persists the final `session_ref` in the immutable attempt.
 
 The context projection contains the assignment, relevant charter constraints, global risk references, required resolved facts with provenance links, and the relevant frontier neighborhood. It does not contain all historical resolutions or unrelated active work.
 
-The portable interaction path is through the main tech-lead session: it relays a tactical question to the current worker or records a human answer in the assignment result. If the host exposes an attachable or steerable child session, the user may speak to the worker directly. That richer UI is an optimization, not part of the state protocol. In either path, tactical discussion may change execution details, while a change to the governing design, assumptions, scope, or acceptance criteria triggers the divergence flow.
+The portable interaction path is through the main tech-lead session: it relays a tactical question to the current worker or records a human answer in the assignment result. If the host exposes an attachable or steerable child session, the user may speak to the worker directly using the recorded `active_session` identifier. That richer UI is an optimization, not part of the state protocol—but the session identifier in `WORK.md` makes it discoverable. In either path, tactical discussion may change execution details, while a change to the governing design, assumptions, scope, or acceptance criteria triggers the divergence flow.
 
 ### Verify and resolve
 
-The global tech lead maps each acceptance criterion to worker evidence, a deterministic check, a fresh verifier, or human sign-off. Deterministic checks run through native shell and repository tools. Independent review uses a fresh native agent context. Human sign-off uses the harness's ordinary interaction channel.
+The global tech lead maps each acceptance criterion to worker evidence, a deterministic check, a fresh verifier, or human sign-off. Deterministic checks run through native shell and repository tools. Independent review uses a fresh native agent context; the tech lead records the verifier's session identifier in `active_session` (transitioning to `VERIFYING`) and reports it to the human. Human sign-off uses the harness's ordinary interaction channel.
+
+When the verifier returns, the tech lead clears `active_session` and persists the final `verifier_ref` in the immutable verification record.
 
 Only the tech lead writes a revision-specific resolution under `resolutions/`, updates the evidence-backed overview, and releases dependency edges after all required verification passes.
 
 ### Steer, diverge, or pivot
 
-- Tactical steering stays in the current worker thread when the assignment contract is unchanged.
+- Tactical steering stays in the current worker thread when the assignment contract is unchanged. A human may attach directly to the worker session using the `active_session` identifier to provide tactical input.
 - Fundamental divergence stops affected work and starts a fresh sub-tech-lead context with the full relevant project view.
 - A changed contract starts a fresh worker context; unchanged contracts may resume their existing sessions.
 - A pivot creates a normal revision-transition work item pointing to the primary node and its current revision. That item may decompose into impact-analysis, implementation-migration, and artifact-reconciliation children, including children linked to invalidated descendants. Resolving the transition publishes the primary node's next revision; no special external runtime is involved.
