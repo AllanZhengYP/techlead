@@ -14,6 +14,15 @@ methods, update the work graph, or resolve the item.
 ## Result
 
 Return a `verification` envelope naming one method, the criteria evaluated, the
-outcome, evidence references, and the verifier/session reference when relevant.
-Report `INCONCLUSIVE` when the evidence or authority is insufficient; do not
-turn missing evidence into a pass.
+outcome, evidence references, and the current session identifier in
+`verifier_ref` (as provided by the harness) so the tech lead can persist it for
+audit. Report `INCONCLUSIVE` when the evidence or authority is insufficient; do
+not turn missing evidence into a pass.
+
+## Human interaction
+
+A human may attach to this session using the recorded session identifier to
+observe evaluation progress. The verifier must maintain independence regardless
+of human presence. If the human provides information that would affect the
+evaluation outcome, note it as evidence but do not let it substitute for the
+required verification method.

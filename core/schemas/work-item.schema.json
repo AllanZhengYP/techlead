@@ -6,8 +6,8 @@
     "protocol_version", "kind", "id", "title", "state", "active_revision",
     "parents", "children", "dependencies", "dependents", "related",
     "replaces", "replaced_by", "revision_transitions", "risk_ids",
-    "active_contract", "latest_attempt", "latest_verification", "target_node",
-    "from_revision"
+    "active_contract", "active_session", "latest_attempt", "latest_verification",
+    "target_node", "from_revision"
   ],
   "properties": {
     "protocol_version": {"const": "1.0"},
@@ -33,6 +33,7 @@
     "revision_transitions": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]+$"}, "uniqueItems": true},
     "risk_ids": {"type": "array", "items": {"type": "string", "pattern": "^RISK-[0-9]+$"}, "uniqueItems": true},
     "active_contract": {"type": ["string", "null"]},
+    "active_session": {"type": ["string", "null"], "description": "Opaque harness session identifier (e.g. Claude session ID or Codex session ID) for the currently active worker or verifier. Set at delegation time, cleared on completion or failure. Enables a human to attach to the live agent session."},
     "latest_attempt": {"type": ["string", "null"]},
     "latest_verification": {"type": ["string", "null"]},
     "target_node": {"type": ["string", "null"]},
