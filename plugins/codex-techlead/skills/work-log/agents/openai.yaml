@@ -1,0 +1,6 @@
+interface:
+  display_name: "Work Log"
+  short_description: "Manage and inspect the Tech Lead work log"
+  default_prompt: "Use $work-log to inspect or manage the Tech Lead work log."
+policy:
+  allow_implicit_invocation: false

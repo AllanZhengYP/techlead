@@ -1,207 +1,100 @@
-# Tech Lead State Protocol 1.0
+# Tech Lead State Protocol 2.0
 
-This document defines the portable, provider-neutral `.techlead/` state
-contract. Codex and Claude Code adapters may invoke roles differently, but they
-must read and produce state with these semantics.
+This protocol defines the provider-neutral work log used by the Tech Lead
+design-review workflow. It records signed semantic baselines, current work-item
+state, resumable external sessions, and parent roll-up. It does not orchestrate
+implementation or independently verify implementation correctness.
 
 ## Encoding
 
-Every protocol record is UTF-8 Markdown with YAML frontmatter. Protocol 1.0
-intentionally accepts a deterministic YAML subset so the distributed validator
-does not need a package manager:
+Canonical records are UTF-8 Markdown with a deterministic YAML-frontmatter
+subset: top-level mappings, scalar values, JSON-style inline values, and scalar
+block lists. Nested YAML mappings, anchors, tags, block scalars, and implicit
+dates are not supported. The Markdown body remains human-owned and free-form.
 
-- top-level `key: value` pairs;
-- strings, integers, booleans, and `null`;
-- JSON-style inline arrays and objects (JSON is valid YAML);
-- block arrays whose items are scalars; and
-- full-line comments beginning with `#`.
+Only `PROJECT.md` declares `protocol_version: "2.0"`. Record kinds are inferred
+from canonical paths. Frontmatter schemas are closed and live in
+[`../schemas`](../schemas).
 
-Nested block maps, anchors, tags, and implicit dates are not part of protocol
-1.0. Use inline JSON for structured values, such as acceptance criteria.
-
-Every record includes `protocol_version: "1.0"` and a `kind`. Schemas live in
-[`../schemas`](../schemas). Markdown bodies carry explanations and rationale;
-frontmatter carries identity, lifecycle, references, and provenance that can be
-checked mechanically.
-
-## Project layout
+## Canonical project layout
 
 ```text
-.techlead/
-├── CHARTER.md
-├── OVERVIEW.md
-├── FRONTIER.md
-├── RISKS.md
-├── DECISIONS.md
-└── work-items/<WI-id>/
-    ├── WORK.md
-    ├── revisions/<revision>.md
-    ├── attempts/<attempt-id>.md
-    ├── verifications/<verification-id>.md
-    ├── resolutions/<revision>.md
-    ├── evidence/
-    └── INVALIDATION.md
+<descriptive-project-name>/
+├── PROJECT.md
+├── work-items/
+│   └── WI-001-descriptive-title/
+│       ├── WORK.md
+│       └── revisions/
+│           └── r1-descriptive-baseline.md
+├── sessions/
+│   └── SES-001-descriptive-session.md
+├── local/                 # ignored machine-local mappings and writer lock
+└── workspace-links/       # ignored symlinks to attached workspaces
 ```
 
-`WORK.md` is the only mutable canonical record for a graph node. Files under
-`revisions/`, `attempts/`, `verifications/`, and `resolutions/` become immutable
-once referenced by a later record. `INVALIDATION.md` is historical and does not
-rewrite earlier evidence.
+The project directory is the canonical log root. An attached workspace exposes
+it through an ignored `.techlead` symlink and carries a portable
+`.techlead-project` locator containing one logical workspace ID and one or more
+project UUIDs.
 
-## IDs and references
+## Records
 
-IDs are stable, opaque, and globally unique within a project:
+`PROJECT.md` contains exactly `protocol_version`, `project_id`, `title`,
+`root_work_item`, and `workspace_ids`. A project has exactly one root.
 
-| Entity | Pattern |
-| --- | --- |
-| Work item | `WI-001` |
-| Assignment contract | `AC-001` |
-| Attempt/result | `ATT-001` |
-| Verification/evidence | `EV-001` |
-| Resolution | `RES-001` |
-| Invalidation | `INV-001` |
-| Risk | `RISK-001` |
-| Decision | `DEC-001` |
+Each `WORK.md` contains exactly `id`, `title`, `work_type`, `state`, `parent`,
+`active_revision`, and `review_required`. Work types are `design`,
+`exploration`, `implementation`, and `verification`. States are `in-design`,
+`in-working`, and `resolved`. Every non-root item has exactly one parent.
 
-Work-item resolution references use `<work-item>@<revision>`, for example
-`WI-001@r1`. File references are repository-relative POSIX paths and must not
-escape the repository.
+Each immutable revision contains exactly `revision`, `title`, and `supersedes`.
+Its body is the self-contained signed semantic baseline. `r1` supersedes
+`null`; every later revision supersedes the preceding revision. Descriptive
+revision filenames use `rN-description.md`.
 
-## Project records
+Each live session contains `session`, `provider`, `provider_session_id`, `role`,
+`status`, `work_items`, and `workspace_id`, plus optional `git_branch` and
+`git_revision`. Roles are `design`, `exploration`, `implementation`,
+`verification`, and `techlead-review`; status is `active` or `paused`. Closing a
+session removes its live file after compact provenance has been written to its
+work items.
 
-- `CHARTER.md` (`project_charter`) contains human-authoritative intent.
-- `OVERVIEW.md` (`project_overview`) indexes `current_resolutions`, every
-  `historical_resolution`, and `current_facts`. Each fact contains its claim and
-  one or more supporting resolution references. Current entries must resolve
-  and must not point to an invalidated or suspended node revision.
-- `FRONTIER.md` (`project_frontier`) lists the unresolved graph projection in
-  `work_items`.
-- `RISKS.md` (`risk_register`) stores structured `risks` with status, owner,
-  affected and mitigation items, evidence, and residual uncertainty; each ID
-  has a matching `## RISK-nnn` body heading.
-- `DECISIONS.md` (`decision_register`) stores structured `decisions` with
-  governing status, resolution provenance, and supersession links; each ID has
-  a matching `## DEC-nnn` heading.
+## State and revision invariants
 
-## Work graph
+- `in-design` has `active_revision: null` and `review_required: false`.
+- `in-working` names an existing active revision and may require review.
+- `resolved` names an existing active revision, never requires review, has
+  only resolved children, accepts no new children, and is terminal.
+- Initial sign-off creates `r1` and moves the item to `in-working`.
+- A later revision is created only when the signed semantic baseline changes.
+  Editorial rewrites, reaffirmation, and resolution retain the active revision.
+- A material child contradiction sets `review_required: true` on affected
+  `in-working` ancestors immediately. Ordinary parent completion sets the flag
+  when every current child is resolved.
+- Only an explicitly invoked review applies a work-item state transition.
 
-`WORK.md` records decomposition (`parents`/`children`), scheduling
-(`dependencies`/`dependents`), symmetric related context (`related`),
-replacement (`replaces`/`replaced_by`), and revision-transition ownership
-(`revision_transitions`). Every relationship has a mechanically checked
-backlink.
+## Links and workspaces
 
-The allowed states are:
+Context is linked rather than copied. Cross-workspace links use ordinary
+Markdown paths through `workspace-links/<workspace-id>/...`. Deterministic
+validation checks local targets, declared workspace membership, and heading
+anchors. The active review checks external URLs when host permissions allow it
+and blocks a transition when a required source is unavailable.
 
-`DRAFT`, `READY`, `DECOMPOSED`, `IN_PROGRESS`, `BLOCKED`, `SUBMITTED`,
-`VERIFYING`, `NEEDS_CHANGES`, `PENDING_HUMAN`, `PENDING_PLAN_REVIEW`,
-`REVISING`, `RESOLVED`, `REPLACED`, and `INVALIDATED`.
+Workspace IDs are stable across clones and worktrees. A provider-neutral local
+registry maps project UUIDs to canonical project paths. Registry paths,
+attachment mappings, `.techlead` symlinks, `workspace-links`, locks, and
+generated snapshots are local state and must never be committed.
 
-Additional invariants include:
+## Mutation and authority boundary
 
-- a `READY` item has only `RESOLVED` dependencies;
-- a `DECOMPOSED` item has at least one child;
-- an active assignment points to a contract for its active revision;
-- `active_session` is non-null only when state is `IN_PROGRESS` or `VERIFYING`;
-- a `RESOLVED` item has a resolution for its active revision;
-- an `INVALIDATED` item has `INVALIDATION.md`;
-- a `REVISING` item names at least one transition item; and
-- a transition item sets both `target_node` and `from_revision`, while its
-  target lists it in `revision_transitions`.
+Canonical mutations use a project-local single-writer lock, re-read
+preconditions, validate a complete staged result, replace files safely, and
+roll back on failure. Concurrent writing from different machines is outside
+Protocol 2.0.
 
-## Session recording and human attachment
-
-When the tech lead delegates work to a worker or verifier, the harness returns
-an opaque session identifier (e.g. a Claude conversation ID or Codex session
-ID). The tech lead records this identifier immediately in the work item's
-`active_session` field so a human operator can locate and attach to the live
-agent session without waiting for completion.
-
-### Lifecycle
-
-1. **Set on delegation.** When the harness spawns a worker or verifier agent,
-   record the returned session identifier in `WORK.md` frontmatter as
-   `active_session`. The work item transitions to `IN_PROGRESS` (worker) or
-   `VERIFYING` (verifier) at the same time.
-2. **Cleared on completion.** When the agent returns its result (success,
-   failure, or divergence), the tech lead sets `active_session` to `null` and
-   records the final session reference in the immutable result envelope
-   (`session_ref` for worker results, `verifier_ref` for verifications).
-3. **Preserved on resumption.** If the harness supports session resumption and
-   the contract has not changed, `active_session` keeps its value across tech
-   lead session boundaries so that a new tech lead session can still direct a
-   human to the ongoing agent.
-
-### Human attachment
-
-The `active_session` value is sufficient for a human to locate the live agent
-conversation in the host platform (Claude or Codex). The human may:
-
-- Observe progress and intermediate reasoning.
-- Provide tactical steering that does not change the assignment contract.
-- Answer clarifying questions the worker would otherwise block on.
-
-If the human's input changes governing design, acceptance criteria, or
-assumptions, the worker must treat it as divergence and return
-`PENDING_PLAN_REVIEW` per its role contract. The session identifier remains
-valid for the lifetime of the agent context regardless of outcome.
-
-### Result envelopes
-
-The final session reference is additionally persisted in the immutable result:
-
-- `session_ref` in `worker_result` — links the completed attempt to its
-  conversation for post-hoc audit and potential resumption.
-- `verifier_ref` in `verification` — links the completed evaluation to its
-  conversation.
-
-These fields are nullable. A `null` value indicates the harness did not provide
-a resumable session reference.
-
-## Assignment contracts and role results
-
-An `assignment_contract` binds one worker session to one work-item revision.
-Its `criteria` array contains objects with a criterion `id` and one or more
-required methods from `worker_attested`, `deterministic`, `independent_review`,
-or `human_signoff`. Criterion prose belongs in the Markdown body under the same
-ID.
-
-A `worker_result` reports one bounded execution attempt. It records its contract,
-outcome, changed artifacts, evidence references, Git revisions, and any affected
-work items. `PENDING_PLAN_REVIEW` is a result, not permission for the worker to
-edit the graph.
-
-A `plan_review_result` is the sub-tech-lead's impact-aware proposal. It records
-the divergence source, affected nodes, proposed graph changes, and evidence.
-Only the global tech lead applies the proposal.
-
-A `verification` evaluates named criteria with exactly one method and an
-outcome of `PASS`, `FAIL`, or `INCONCLUSIVE`. A `resolution` may be created only
-when its referenced passing verifications cover every method required by every
-criterion. The validator checks this coverage; the global tech lead still owns
-the semantic judgment that the evidence is meaningful.
-
-The global tech lead's result is the coordinated state transition itself:
-updated canonical records plus any new immutable records. It does not rely on a
-separate transcript or hidden provider state.
-
-## Revisions, pivots, and invalidation
-
-A pivoted primary node enters `REVISING` and lists a normal transition work item.
-The transition sets `target_node` and `from_revision`. A later resolution of the
-transition may publish the target's next revision after affected nodes and
-artifacts are reconciled.
-
-An invalidated descendant or consumer enters `INVALIDATED`; its
-`INVALIDATION.md` records the revision that lost authority, the governing
-transition item, affected facts and artifacts, and migration items. Historical
-resolutions stay in the overview's historical index but leave its current
-resolution set.
-
-## Validation boundary
-
-The validator checks syntax, schemas, ID uniqueness, paths, record placement,
-graph links and backlinks, lifecycle preconditions, reference integrity,
-frontier agreement, overview resolution indexes, and criterion coverage. It does
-not decide whether a plan is wise, evidence is persuasive, a risk is severe, or
-a human should approve a tradeoff.
+The deterministic helper validates and applies a semantic decision supplied by
+Tech Lead and the human. It does not decide whether assumptions are acceptable,
+alternatives are sufficiently covered, evidence is persuasive, a result is
+correct, or work is safe to parallelize. Git is optional; protocol operations
+never stage or commit files.

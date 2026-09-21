@@ -57,7 +57,7 @@ def write_release_marketplace(output: Path, *, archive_url: str, digest: str) ->
                     "sha256": digest,
                 },
                 "description": (
-                    "Maintain durable project intent, work graphs, evidence, verification, and pivots."
+                    "Bar-raise designs and manage a durable revisioned work-item log."
                 ),
                 "category": "development",
                 "tags": ["engineering", "planning", "agents"],

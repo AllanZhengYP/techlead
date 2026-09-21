@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "codex-techlead",
+  "version": "0.2.0",
+  "description": "Explicit design bar-raising and a durable Protocol 2.0 work-item log.",
+  "author": {
+    "name": "Tech Lead Agent contributors",
+    "url": "https://github.com/AllanZhengYP/techlead"
+  },
+  "homepage": "https://github.com/AllanZhengYP/techlead",
+  "repository": "https://github.com/AllanZhengYP/techlead",
+  "keywords": ["tech-lead", "design-review", "work-log", "engineering"]
+}

@@ -2,42 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Tech Lead work item",
   "type": "object",
-  "required": [
-    "protocol_version", "kind", "id", "title", "state", "active_revision",
-    "parents", "children", "dependencies", "dependents", "related",
-    "replaces", "replaced_by", "revision_transitions", "risk_ids",
-    "active_contract", "active_session", "latest_attempt", "latest_verification",
-    "target_node", "from_revision"
-  ],
+  "required": ["id", "title", "work_type", "state", "parent", "active_revision", "review_required"],
   "properties": {
-    "protocol_version": {"const": "1.0"},
-    "kind": {"const": "work_item"},
-    "id": {"type": "string", "pattern": "^WI-[0-9]+$"},
+    "id": {"type": "string", "pattern": "^WI-[0-9]{3,}$"},
     "title": {"type": "string", "minLength": 1},
-    "state": {
-      "enum": [
-        "DRAFT", "READY", "DECOMPOSED", "IN_PROGRESS", "BLOCKED",
-        "SUBMITTED", "VERIFYING", "NEEDS_CHANGES", "PENDING_HUMAN",
-        "PENDING_PLAN_REVIEW", "REVISING", "RESOLVED", "REPLACED",
-        "INVALIDATED"
-      ]
-    },
-    "active_revision": {"type": "string", "pattern": "^r[1-9][0-9]*$"},
-    "parents": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]+$"}, "uniqueItems": true},
-    "children": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]+$"}, "uniqueItems": true},
-    "dependencies": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]+$"}, "uniqueItems": true},
-    "dependents": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]+$"}, "uniqueItems": true},
-    "related": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]+$"}, "uniqueItems": true},
-    "replaces": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]+$"}, "uniqueItems": true},
-    "replaced_by": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]+$"}, "uniqueItems": true},
-    "revision_transitions": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]+$"}, "uniqueItems": true},
-    "risk_ids": {"type": "array", "items": {"type": "string", "pattern": "^RISK-[0-9]+$"}, "uniqueItems": true},
-    "active_contract": {"type": ["string", "null"]},
-    "active_session": {"type": ["string", "null"], "description": "Opaque harness session identifier (e.g. Claude session ID or Codex session ID) for the currently active worker or verifier. Set at delegation time, cleared on completion or failure. Enables a human to attach to the live agent session."},
-    "latest_attempt": {"type": ["string", "null"]},
-    "latest_verification": {"type": ["string", "null"]},
-    "target_node": {"type": ["string", "null"]},
-    "from_revision": {"type": ["string", "null"]}
+    "work_type": {"enum": ["design", "exploration", "implementation", "verification"]},
+    "state": {"enum": ["in-design", "in-working", "resolved"]},
+    "parent": {"type": ["string", "null"], "pattern": "^WI-[0-9]{3,}$"},
+    "active_revision": {"type": ["string", "null"], "pattern": "^r[1-9][0-9]*$"},
+    "review_required": {"type": "boolean"}
   },
   "additionalProperties": false
 }

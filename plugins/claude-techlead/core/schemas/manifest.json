@@ -1,17 +1,10 @@
 {
-  "protocol_version": "1.0",
+  "protocol_version": "2.0",
   "schemas": {
-    "project_charter": "project-record.schema.json",
-    "project_overview": "project-record.schema.json",
-    "project_frontier": "project-record.schema.json",
-    "risk_register": "project-record.schema.json",
-    "decision_register": "project-record.schema.json",
+    "project": "project.schema.json",
     "work_item": "work-item.schema.json",
-    "assignment_contract": "assignment-contract.schema.json",
-    "worker_result": "worker-result.schema.json",
-    "plan_review_result": "plan-review-result.schema.json",
-    "verification": "verification.schema.json",
-    "resolution": "resolution.schema.json",
-    "invalidation": "invalidation.schema.json"
+    "revision": "revision.schema.json",
+    "session": "session.schema.json",
+    "workspace_locator": "workspace-locator.schema.json"
   }
 }

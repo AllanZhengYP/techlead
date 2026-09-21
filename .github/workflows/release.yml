@@ -1,4 +1,4 @@
-name: Release Claude Code plugin
+name: Release Tech Lead plugins
 
 on:
   push:
@@ -27,6 +27,9 @@ jobs:
             --output "dist/techlead-claude.zip" \
             --release-marketplace-output "dist/techlead-claude-marketplace.json" \
             --archive-url "https://github.com/AllanZhengYP/techlead/releases/latest/download/techlead-claude.zip"
+          python tools/package_codex_plugin.py \
+            --expected-version "${GITHUB_REF_NAME#v}" \
+            --output "dist/techlead-codex.zip"
 
       - name: Publish GitHub Release assets
         env:
@@ -36,5 +39,7 @@ jobs:
             "dist/techlead-claude.zip" \
             "dist/techlead-claude.zip.sha256" \
             "dist/techlead-claude-marketplace.json" \
+            "dist/techlead-codex.zip" \
+            "dist/techlead-codex.zip.sha256" \
             --generate-notes \
             --verify-tag

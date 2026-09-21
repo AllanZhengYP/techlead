@@ -44,6 +44,21 @@ def parse_document(text: str, *, source: str = "<document>") -> ParsedDocument:
     return ParsedDocument(metadata=metadata, body="".join(lines[end + 1 :]))
 
 
+def dump_document(metadata: dict[str, Any], body: str = "") -> str:
+    """Render the deterministic YAML subset used by protocol records."""
+
+    lines = ["---"]
+    for key, value in metadata.items():
+        if not _KEY.fullmatch(key):
+            raise FrontMatterError(f"invalid key {key!r}")
+        lines.append(f"{key}: {_dump_scalar(value)}")
+    lines.append("---")
+    rendered = "\n".join(lines) + "\n"
+    if body:
+        rendered += body if body.endswith("\n") else body + "\n"
+    return rendered
+
+
 def _parse_mapping(lines: list[str], *, source: str) -> dict[str, Any]:
     result: dict[str, Any] = {}
     index = 0
@@ -121,3 +136,17 @@ def _parse_scalar(text: str, *, source: str, line_number: int) -> Any:
             f"{source}:{line_number}: YAML tags, anchors, and block scalars are not supported"
         )
     return text
+
+
+def _dump_scalar(value: Any) -> str:
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, (str, list, dict)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    raise FrontMatterError(f"unsupported frontmatter value {value!r}")

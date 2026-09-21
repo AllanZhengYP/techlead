@@ -1,0 +1,17 @@
+{
+  "name": "codex-techlead",
+  "version": "0.2.0",
+  "description": "Explicit design bar-raising and a durable Protocol 2.0 work-item log.",
+  "author": {
+    "name": "Tech Lead Agent contributors"
+  },
+  "interface": {
+    "displayName": "Tech Lead",
+    "shortDescription": "Bar-raise designs and manage a durable work log.",
+    "longDescription": "Review design and work outcomes explicitly, preserve revision-bound sign-offs, track resumable sessions, and recommend coherent next work without owning implementation.",
+    "developerName": "Tech Lead Agent contributors",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": "Use $work-log to show the current Tech Lead project status and next actions."
+  }
+}

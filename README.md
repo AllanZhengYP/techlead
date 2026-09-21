@@ -1,68 +1,83 @@
 # Tech Lead Agent
 
-A local-first technical-lead workflow for long-running engineering projects.
+A local-first design-review bar-raiser and durable work-item log for Codex and
+Claude Code. Tech Lead is explicitly invoked; implementation and independent
+verification remain in the user's tools and sessions of choice.
 
-The repository is implementing the design in [`.designs/vision.md`](.designs/vision.md)
-and [`.designs/high-level-design.md`](.designs/high-level-design.md). The first
-vertical slice is the provider-neutral `.techlead/` state protocol and its
-deterministic validator, packaged in a Claude Code plugin.
+The product behavior is defined by the [vision](.designs/vision.md),
+[high-level design](.designs/high-level-design.md), and
+[low-level design](.designs/low-level-design.md). Both provider plugins use the
+same dependency-free [Protocol 2.0](core/protocol/PROTOCOL.md) engine.
 
-## Install in Claude Code
+## Capabilities
 
-The GitHub marketplace path works with plugin-capable Claude Code versions and
-is the primary development and compatibility channel:
+Both adapters expose exactly three capabilities:
+
+- `review-work`: bar-raise an `in-design` item, assess a supplied `in-working`
+  outcome, or synthesize child verdicts;
+- `create-work-item`: create one unsigned child beneath an explicit parent; and
+- `work-log`: initialize or attach projects, inspect status, manage resumable
+  sessions, validate state, and recommend next actions.
+
+Codex invokes them as `$review-work`, `$create-work-item`, and `$work-log`.
+Claude Code invokes `/techlead:review-work`, `/techlead:create-work-item`, and
+`/techlead:work-log`. Implicit invocation is disabled.
+
+## Plugin artifacts
+
+The Claude Code adapter is available through the repository marketplace:
 
 ```sh
 claude plugin marketplace add AllanZhengYP/techlead
 claude plugin install techlead@techlead --scope user
 ```
 
-Pin the marketplace to a release tag when reproducibility matters:
+The Codex adapter is the portable plugin at `plugins/codex-techlead`; add it to
+the desired personal, repository, or team marketplace when testing locally.
+Tagged releases publish deterministic `techlead-claude.zip` and
+`techlead-codex.zip` archives with SHA-256 sidecars. The Claude release also
+includes its archive-backed marketplace descriptor.
+
+## Initialize and inspect a project
 
 ```sh
-claude plugin marketplace add AllanZhengYP/techlead@v0.1.0
+tools/techlead-state init \
+  --control-dir /path/to/techlead-control \
+  --name session-platform-modernization \
+  --title "Session platform modernization" \
+  --root "Session platform design" \
+  --workspace /path/to/service-workspace \
+  --workspace-id service-a
+
+tools/techlead-state status /path/to/service-workspace
+tools/techlead-state next /path/to/service-workspace
+tools/techlead-state validate /path/to/service-workspace
 ```
 
-Tagged GitHub Releases also publish `techlead-claude.zip`, its SHA-256 checksum,
-and `techlead-claude-marketplace.json`. Claude Code 2.1.224 or newer can install
-that archive-backed marketplace without Git:
+The canonical project is a descriptive directory under the selected control
+root. An attached worktree receives a local `.techlead` symlink and a portable
+`.techlead-project` locator. The helper never stages or commits files; local
+symlinks, mappings, locks, and workspace links are excluded from Git.
 
-```sh
-claude plugin marketplace add \
-  https://github.com/AllanZhengYP/techlead/releases/latest/download/techlead-claude-marketplace.json
-claude plugin install techlead@techlead-release --scope user
-```
-
-The installed plugin provides `/techlead:initialize-project`,
-`/techlead:lead-project`, `/techlead:reconcile-pivot`, and
-`/techlead:validate-state`, plus native worker, verifier, and sub-tech-lead
-agents.
-
-## Validate a project
-
-```sh
-tools/techlead-state validate /path/to/project
-```
-
-The command has no third-party runtime dependencies. See
-[`core/protocol/PROTOCOL.md`](core/protocol/PROTOCOL.md) for the record contract.
+Use the explicit provider skill for semantic review. The deterministic
+`apply-review` command exists for the skill to persist a human-authorized
+decision; it does not decide whether a design or result is acceptable.
 
 ## Development checks
 
 ```sh
 python3 tools/sync_claude_plugin.py --check
 python3 -m unittest discover -v
+python3 /path/to/plugin-creator/scripts/validate_plugin.py plugins/codex-techlead
 claude plugin validate plugins/claude-techlead
-claude plugin validate .
 ```
 
-The conformance suite materializes complete graph-expansion, resolution-release,
-and pivot-reconciliation snapshots and validates them through the public CLI.
-
-After changing `core/`, the validator, or conformance fixtures, run
-`python3 tools/sync_claude_plugin.py` to refresh the self-contained plugin copy.
-For local adapter testing, start Claude Code with:
+After changing `core/`, `tools/techlead_state/`, or conformance fixtures, run:
 
 ```sh
-claude --plugin-dir ./plugins/claude-techlead
+python3 tools/sync_claude_plugin.py
 ```
+
+Despite its historical filename, that command synchronizes the shared core into
+both provider plugins. Package release artifacts with
+`tools/package_claude_plugin.py` and `tools/package_codex_plugin.py`.

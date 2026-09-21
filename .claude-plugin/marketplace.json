@@ -11,7 +11,7 @@
     {
       "name": "techlead",
       "source": "./plugins/claude-techlead",
-      "description": "Maintain durable project intent, work graphs, evidence, verification, and pivots.",
+      "description": "Bar-raise designs and manage a durable revisioned work-item log.",
       "category": "development",
       "tags": ["engineering", "planning", "agents"]
     }

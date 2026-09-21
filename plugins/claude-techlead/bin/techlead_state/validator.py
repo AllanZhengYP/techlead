@@ -1,32 +1,27 @@
-"""Cross-record validator for `.techlead/` protocol state."""
+"""Deterministic validator for Tech Lead State Protocol 2.0."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
-from pathlib import Path, PurePosixPath
+import os
+from pathlib import Path
 import re
-from typing import Any, Iterable
+import subprocess
+from typing import Any
+from urllib.parse import unquote
 
 from .frontmatter import FrontMatterError, ParsedDocument, parse_file
 from .schema import validate_schema
 
 
-PROTOCOL_VERSION = "1.0"
-TERMINAL_STATES = {"RESOLVED", "REPLACED", "INVALIDATED"}
-ASSIGNMENT_STATES = {
-    "READY", "IN_PROGRESS", "BLOCKED", "SUBMITTED", "VERIFYING",
-    "NEEDS_CHANGES", "PENDING_HUMAN", "PENDING_PLAN_REVIEW",
-}
-ROOT_RECORDS = {
-    "CHARTER.md": "project_charter",
-    "OVERVIEW.md": "project_overview",
-    "FRONTIER.md": "project_frontier",
-    "RISKS.md": "risk_register",
-    "DECISIONS.md": "decision_register",
-}
-RESOLUTION_REF = re.compile(r"^(WI-[0-9]+)@(r[1-9][0-9]*)$")
-HEADING_ID = re.compile(r"^##\s+((?:RISK|DEC)-[0-9]+)\b", re.MULTILINE)
+PROTOCOL_VERSION = "2.0"
+WORK_ID = re.compile(r"^WI-[0-9]{3,}$")
+WORK_DIR = re.compile(r"^(WI-[0-9]{3,})-([a-z0-9]+(?:-[a-z0-9]+)*)$")
+REVISION_FILE = re.compile(r"^(r[1-9][0-9]*)-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
+SESSION_FILE = re.compile(r"^(SES-[0-9]{3,})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
+MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
+HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -48,7 +43,7 @@ class ValidationReport:
         return not self.issues
 
     def add(self, code: str, message: str, path: Path | str | None = None) -> None:
-        rendered = None
+        rendered: str | None = None
         if isinstance(path, Path):
             try:
                 rendered = path.relative_to(self.project_root).as_posix()
@@ -62,41 +57,131 @@ class ValidationReport:
 @dataclass(frozen=True)
 class Record:
     path: Path
+    kind: str
     document: ParsedDocument
+    owner: str | None = None
 
     @property
     def data(self) -> dict[str, Any]:
         return self.document.metadata
 
-    @property
-    def kind(self) -> str | None:
-        value = self.data.get("kind")
-        return value if isinstance(value, str) else None
 
+def validate_project(
+    project_root: str | Path,
+    *,
+    schema_dir: str | Path | None = None,
+    allow_active_writer: bool = False,
+) -> ValidationReport:
+    """Validate a canonical project root or an attached workspace."""
 
-def validate_project(project_root: str | Path, *, schema_dir: str | Path | None = None) -> ValidationReport:
-    root = Path(project_root).resolve()
-    state_root = root if root.name == ".techlead" else root / ".techlead"
-    actual_project_root = state_root.parent
-    report = ValidationReport(project_root=actual_project_root)
-    if not state_root.is_dir():
-        report.add("state.missing", "expected a .techlead directory", state_root)
+    supplied = Path(project_root).expanduser()
+    root = _locate_project_root(supplied)
+    report = ValidationReport(project_root=root)
+    if not (root / "PROJECT.md").is_file():
+        legacy = root / "CHARTER.md"
+        if legacy.is_file() or (supplied / ".techlead" / "CHARTER.md").is_file():
+            report.add(
+                "protocol.legacy",
+                "Protocol 1.0 state cannot be reinterpreted; initialize a separate Protocol 2.0 project",
+                root,
+            )
+        else:
+            report.add("project.missing", "expected PROJECT.md in the canonical project root", root)
+        return report
+
+    lock = root / "local" / "write.lock"
+    if lock.exists() and not allow_active_writer:
+        report.add("writer.active", "a canonical mutation is currently in progress", lock)
         return report
 
     schemas = _load_schemas(Path(schema_dir) if schema_dir else _default_schema_dir(), report)
-    records = _load_records(state_root, report)
+    records = _load_records(root, report)
     report.records_checked = len(records)
+    report.work_items_checked = sum(record.kind == "work_item" for record in records)
 
     for record in records:
-        if record.kind not in schemas:
-            report.add("schema.kind", f"unknown or missing record kind {record.kind!r}", record.path)
+        schema = schemas.get(record.kind)
+        if schema is None:
+            report.add("schema.kind", f"no schema is registered for {record.kind}", record.path)
             continue
-        for issue in validate_schema(record.data, schemas[record.kind]):
+        for issue in validate_schema(record.data, schema):
             report.add("schema.invalid", f"{issue.path}: {issue.message}", record.path)
 
-    _validate_locations(state_root, records, report)
-    _validate_records(state_root, records, report)
+    _validate_locations(root, records, report)
+    _validate_project_graph(root, records, report)
+    _validate_links(root, records, report)
+    _validate_git_safety(root, report)
     return report
+
+
+def validate_context_links(
+    project_root: str | Path,
+    documents: list[str | Path],
+) -> tuple[ValidationReport, list[str]]:
+    """Validate links in an explicit, bounded set of review documents."""
+
+    root = _locate_project_root(Path(project_root).expanduser())
+    report = ValidationReport(project_root=root)
+    records: list[Record] = []
+    project_path = root / "PROJECT.md"
+    if project_path.is_file():
+        try:
+            records.append(Record(project_path, "project", parse_file(project_path)))
+        except (OSError, FrontMatterError) as exc:
+            report.add("record.parse", str(exc), project_path)
+    external_urls: set[str] = set()
+    for supplied in documents:
+        path = _canonical_context_path(root, Path(supplied).expanduser())
+        if path is None or not path.is_file():
+            report.add("link.context_missing", f"review context does not exist: {supplied}", str(supplied))
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            report.add("link.context_read", f"cannot read review context: {exc}", path)
+            continue
+        records.append(Record(path, "context", ParsedDocument(metadata={}, body=text)))
+        for match in MARKDOWN_LINK.finditer(text):
+            destination = match.group(1).strip().strip("<>")
+            if re.match(r"^https?://", destination):
+                external_urls.add(destination)
+    _validate_links(root, records, report)
+    report.records_checked = len(records)
+    return report, sorted(external_urls)
+
+
+def _locate_project_root(path: Path) -> Path:
+    path = path.resolve()
+    if (path / "PROJECT.md").is_file():
+        return path
+    selection = path / ".techlead"
+    if selection.exists() and (selection / "PROJECT.md").is_file():
+        return selection.resolve()
+    if path.name == ".techlead":
+        return path.resolve()
+    return path
+
+
+def _canonical_context_path(root: Path, supplied: Path) -> Path | None:
+    absolute = supplied.absolute() if supplied.is_absolute() else (Path.cwd() / supplied).absolute()
+    try:
+        absolute.relative_to(root)
+        return absolute
+    except ValueError:
+        pass
+    links = root / "workspace-links"
+    if not links.is_dir():
+        return None
+    resolved = absolute.resolve()
+    for link in links.iterdir():
+        if not link.is_symlink():
+            continue
+        try:
+            relative = resolved.relative_to(link.resolve())
+        except ValueError:
+            continue
+        return link / relative
+    return None
 
 
 def _default_schema_dir() -> Path:
@@ -112,7 +197,6 @@ def _load_schemas(schema_dir: Path, report: ValidationReport) -> dict[str, dict[
         return {}
     if manifest.get("protocol_version") != PROTOCOL_VERSION:
         report.add("schema.version", f"schema manifest must declare protocol {PROTOCOL_VERSION}", manifest_path)
-
     result: dict[str, dict[str, Any]] = {}
     for kind, filename in manifest.get("schemas", {}).items():
         path = schema_dir / filename
@@ -123,670 +207,313 @@ def _load_schemas(schema_dir: Path, report: ValidationReport) -> dict[str, dict[
     return result
 
 
-def _load_records(state_root: Path, report: ValidationReport) -> list[Record]:
-    paths: list[Path] = []
-    for filename in ROOT_RECORDS:
-        path = state_root / filename
-        if not path.is_file():
-            report.add("record.missing", f"required project record {filename} is missing", path)
-        else:
-            paths.append(path)
+def _load_records(root: Path, report: ValidationReport) -> list[Record]:
+    records: list[Record] = []
+    _append_record(records, root / "PROJECT.md", "project", report)
+    for legacy_name in ("CHARTER.md", "OVERVIEW.md", "FRONTIER.md", "RISKS.md", "DECISIONS.md"):
+        legacy = root / legacy_name
+        if legacy.exists():
+            report.add("record.unexpected", f"{legacy_name} is a Protocol 1.0 record and is not part of Protocol 2.0", legacy)
 
-    items_root = state_root / "work-items"
+    items_root = root / "work-items"
     if not items_root.is_dir():
         report.add("record.missing", "work-items directory is missing", items_root)
     else:
         for item_dir in sorted(path for path in items_root.iterdir() if path.is_dir()):
-            work = item_dir / "WORK.md"
-            if not work.is_file():
-                report.add("record.missing", "work-item directory is missing WORK.md", work)
-            else:
-                paths.append(work)
-            for directory in ("revisions", "attempts", "verifications", "resolutions"):
-                child = item_dir / directory
-                if child.is_dir():
-                    paths.extend(sorted(child.glob("*.md")))
-            invalidation = item_dir / "INVALIDATION.md"
-            if invalidation.is_file():
-                paths.append(invalidation)
+            match = WORK_DIR.fullmatch(item_dir.name)
+            owner = match.group(1) if match else None
+            _append_record(records, item_dir / "WORK.md", "work_item", report, owner=owner)
+            revisions = item_dir / "revisions"
+            if revisions.is_dir():
+                for path in sorted(revisions.glob("*.md")):
+                    _append_record(records, path, "revision", report, owner=owner)
+            for child in sorted(path for path in item_dir.iterdir() if path.is_dir()):
+                if child.name != "revisions":
+                    report.add("record.unexpected", "only revisions/ is allowed below a work item", child)
 
-    records: list[Record] = []
-    for path in paths:
-        try:
-            records.append(Record(path=path, document=parse_file(path)))
-        except (OSError, FrontMatterError) as exc:
-            report.add("record.parse", str(exc), path)
+    sessions_root = root / "sessions"
+    if not sessions_root.is_dir():
+        report.add("record.missing", "sessions directory is missing", sessions_root)
+    else:
+        for path in sorted(sessions_root.glob("*.md")):
+            _append_record(records, path, "session", report)
     return records
 
 
-def _validate_locations(state_root: Path, records: list[Record], report: ValidationReport) -> None:
-    by_path = {record.path: record for record in records}
-    for filename, kind in ROOT_RECORDS.items():
-        record = by_path.get(state_root / filename)
-        if record and record.kind != kind:
-            report.add("record.location", f"{filename} must have kind {kind}", record.path)
-
-    for record in records:
-        try:
-            relative = record.path.relative_to(state_root / "work-items")
-        except ValueError:
-            continue
-        parts = relative.parts
-        if len(parts) < 2:
-            report.add("record.location", "record is not inside a work-item directory", record.path)
-            continue
-        item_id = parts[0]
-        if parts[1] == "WORK.md":
-            if len(parts) != 2 or record.kind != "work_item":
-                report.add("record.location", "WORK.md must be a work_item record", record.path)
-            if record.data.get("id") != item_id:
-                report.add("record.location", f"directory {item_id} must match work-item ID", record.path)
-        elif parts[1] == "revisions":
-            _expect_location(record, "assignment_contract", report)
-            if record.data.get("revision") != record.path.stem:
-                report.add("record.location", "contract filename must match its revision", record.path)
-        elif parts[1] == "attempts":
-            if record.kind not in {"worker_result", "plan_review_result"}:
-                report.add("record.location", "attempts may contain worker_result or plan_review_result", record.path)
-            if record.data.get("id") != record.path.stem:
-                report.add("record.location", "attempt filename must match its ID", record.path)
-        elif parts[1] == "verifications":
-            _expect_location(record, "verification", report)
-            if record.data.get("id") != record.path.stem:
-                report.add("record.location", "verification filename must match its ID", record.path)
-        elif parts[1] == "resolutions":
-            _expect_location(record, "resolution", report)
-            if record.data.get("revision") != record.path.stem:
-                report.add("record.location", "resolution filename must match its revision", record.path)
-        elif parts[1] == "INVALIDATION.md":
-            _expect_location(record, "invalidation", report)
-        else:
-            report.add("record.location", "record is outside a protocol record directory", record.path)
-
-
-def _expect_location(record: Record, kind: str, report: ValidationReport) -> None:
-    if record.kind != kind:
-        report.add("record.location", f"expected record kind {kind}, got {record.kind!r}", record.path)
-
-
-def _validate_records(state_root: Path, records: list[Record], report: ValidationReport) -> None:
-    roots = {record.kind: record for record in records if record.path.parent == state_root}
-    work_items = _index_by_kind(records, "work_item", report)
-    contracts = _index_by_kind(records, "assignment_contract", report)
-    attempts = {
-        **_index_by_kind(records, "worker_result", report),
-        **_index_by_kind(records, "plan_review_result", report),
-    }
-    verifications = _index_by_kind(records, "verification", report)
-    resolutions = _index_by_kind(records, "resolution", report)
-    invalidations = _index_by_kind(records, "invalidation", report)
-    report.work_items_checked = len(work_items)
-
-    _validate_global_ids(records, roots, report)
-    _validate_registers(roots, report)
-    _validate_graph(work_items, report)
-    _validate_acyclic(work_items, "children", "decomposition", report)
-    _validate_acyclic(work_items, "dependencies", "dependency", report)
-
-    resolution_by_key: dict[tuple[str, str], Record] = {}
-    for record in resolutions.values():
-        key = (record.data.get("work_item"), record.data.get("revision"))
-        if key in resolution_by_key:
-            report.add("resolution.duplicate", f"multiple resolutions exist for {key[0]}@{key[1]}", record.path)
-        else:
-            resolution_by_key[key] = record
-
-    for record in records:
-        if record.kind == "assignment_contract":
-            _validate_owned_record(record, work_items, report)
-            _validate_criterion_ids(record, report)
-        elif record.kind in {"worker_result", "plan_review_result", "verification", "resolution"}:
-            _validate_owned_record(record, work_items, report)
-            _validate_contract_reference(record, contracts, report)
-        elif record.kind == "invalidation":
-            _validate_owned_record(record, work_items, report)
-
-    for record in attempts.values():
-        _validate_attempt(record, work_items, attempts, report)
-    for record in verifications.values():
-        _validate_verification(record, contracts, report)
-    for record in resolutions.values():
-        _validate_resolution(
-            record, contracts, verifications, resolution_by_key, roots, report
-        )
-    for record in invalidations.values():
-        _validate_invalidation(record, work_items, resolution_by_key, report)
-
-    _validate_work_lifecycle(
-        work_items, contracts, attempts, verifications, resolution_by_key,
-        invalidations, roots, report
-    )
-    _validate_registry_references(roots, work_items, resolution_by_key, report)
-    _validate_project_projections(roots, work_items, resolution_by_key, report)
-
-
-def _index_by_kind(records: Iterable[Record], kind: str, report: ValidationReport) -> dict[str, Record]:
-    result: dict[str, Record] = {}
-    for record in records:
-        if record.kind != kind:
-            continue
-        identifier = record.data.get("id")
-        if not isinstance(identifier, str):
-            continue
-        if identifier in result:
-            report.add("id.duplicate", f"duplicate {kind} ID {identifier}", record.path)
-        else:
-            result[identifier] = record
-    return result
-
-
-def _validate_global_ids(records: list[Record], roots: dict[str | None, Record], report: ValidationReport) -> None:
-    seen: dict[str, Path] = {}
-    for record in records:
-        identifier = record.data.get("id")
-        if isinstance(identifier, str):
-            if identifier in seen:
-                report.add("id.duplicate", f"ID {identifier} is also used by {seen[identifier]}", record.path)
-            else:
-                seen[identifier] = record.path
-    for kind, field in (("risk_register", "risks"), ("decision_register", "decisions")):
-        record = roots.get(kind)
-        if not record:
-            continue
-        for entry in record.data.get(field, []):
-            identifier = entry.get("id") if isinstance(entry, dict) else None
-            if not isinstance(identifier, str):
-                continue
-            if identifier in seen:
-                report.add("id.duplicate", f"ID {identifier} is also used by {seen[identifier]}", record.path)
-            else:
-                seen[identifier] = record.path
-
-
-def _validate_registers(roots: dict[str | None, Record], report: ValidationReport) -> None:
-    expectations = {
-        "project_overview": {"current_resolutions", "historical_resolutions", "current_facts"},
-        "project_frontier": {"work_items"},
-        "risk_register": {"risks"},
-        "decision_register": {"decisions"},
-    }
-    for kind, fields in expectations.items():
-        record = roots.get(kind)
-        if not record:
-            continue
-        for field_name in fields:
-            if field_name not in record.data:
-                report.add("record.field", f"{kind} requires {field_name}", record.path)
-
-    for kind, field, prefix in (
-        ("risk_register", "risks", "RISK-"),
-        ("decision_register", "decisions", "DEC-"),
-    ):
-        record = roots.get(kind)
-        if not record:
-            continue
-        headings = {match for match in HEADING_ID.findall(record.document.body) if match.startswith(prefix)}
-        declared = {
-            entry.get("id") for entry in record.data.get(field, [])
-            if isinstance(entry, dict) and isinstance(entry.get("id"), str)
-        }
-        if len(declared) != len(record.data.get(field, [])):
-            report.add("register.index", f"{field} must contain unique IDs", record.path)
-        if headings != declared:
-            missing = sorted(declared - headings)
-            extra = sorted(headings - declared)
-            report.add(
-                "register.index",
-                f"{field} disagrees with body headings (missing headings={missing}, unindexed headings={extra})",
-                record.path,
-            )
-
-
-def _validate_graph(work_items: dict[str, Record], report: ValidationReport) -> None:
-    pairs = (
-        ("children", "parents"),
-        ("parents", "children"),
-        ("dependencies", "dependents"),
-        ("dependents", "dependencies"),
-        ("related", "related"),
-        ("replaces", "replaced_by"),
-        ("replaced_by", "replaces"),
-    )
-    for item_id, record in work_items.items():
-        for field_name, backlink in pairs:
-            for target_id in record.data.get(field_name, []):
-                if target_id == item_id:
-                    report.add("graph.self", f"{field_name} may not reference the item itself", record.path)
-                    continue
-                target = work_items.get(target_id)
-                if not target:
-                    report.add("reference.missing", f"{field_name} references missing work item {target_id}", record.path)
-                elif item_id not in target.data.get(backlink, []):
-                    report.add("graph.backlink", f"{target_id}.{backlink} must contain {item_id}", record.path)
-
-
-def _validate_acyclic(
-    work_items: dict[str, Record], field_name: str, graph_name: str, report: ValidationReport
-) -> None:
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(item_id: str, trail: list[str]) -> None:
-        if item_id in visiting:
-            cycle = trail[trail.index(item_id):] + [item_id]
-            report.add("graph.cycle", f"{graph_name} cycle: {' -> '.join(cycle)}", work_items[item_id].path)
-            return
-        if item_id in visited:
-            return
-        visiting.add(item_id)
-        trail.append(item_id)
-        for target in work_items[item_id].data.get(field_name, []):
-            if target in work_items:
-                visit(target, trail)
-        trail.pop()
-        visiting.remove(item_id)
-        visited.add(item_id)
-
-    for item_id in work_items:
-        visit(item_id, [])
-
-
-def _validate_owned_record(record: Record, work_items: dict[str, Record], report: ValidationReport) -> None:
-    item_id = record.data.get("work_item")
-    item = work_items.get(item_id)
-    if not item:
-        report.add("reference.missing", f"work_item references missing item {item_id!r}", record.path)
-        return
-    try:
-        owner_dir = record.path.relative_to(item.path.parent).parts[0]
-    except ValueError:
-        report.add("record.owner", f"record for {item_id} is outside that item's directory", record.path)
-        return
-    if owner_dir not in {"revisions", "attempts", "verifications", "resolutions", "INVALIDATION.md"}:
-        report.add("record.owner", f"record for {item_id} is outside a supported item directory", record.path)
-
-
-def _validate_criterion_ids(contract: Record, report: ValidationReport) -> None:
-    ids = [criterion.get("id") for criterion in contract.data.get("criteria", []) if isinstance(criterion, dict)]
-    if len(ids) != len(set(ids)):
-        report.add("contract.criteria", "criterion IDs must be unique within a contract", contract.path)
-
-
-def _validate_contract_reference(record: Record, contracts: dict[str, Record], report: ValidationReport) -> None:
-    contract_id = record.data.get("contract_id")
-    contract = contracts.get(contract_id)
-    if not contract:
-        report.add("reference.missing", f"contract_id references missing contract {contract_id!r}", record.path)
-        return
-    if contract.data.get("work_item") != record.data.get("work_item") or contract.data.get("revision") != record.data.get("revision"):
-        report.add("reference.mismatch", "record work item/revision does not match its contract", record.path)
-
-
-def _validate_attempt(
-    record: Record, work_items: dict[str, Record], attempts: dict[str, Record], report: ValidationReport
-) -> None:
-    for item_id in record.data.get("affected_work_items", []):
-        if item_id not in work_items:
-            report.add("reference.missing", f"affected_work_items references missing {item_id}", record.path)
-    if record.kind == "plan_review_result":
-        source = record.data.get("source_attempt")
-        source_record = attempts.get(source)
-        if not source_record:
-            report.add("reference.missing", f"source_attempt references missing {source!r}", record.path)
-        elif source_record.kind != "worker_result":
-            report.add("reference.mismatch", "source_attempt must reference a worker_result", record.path)
-
-
-def _validate_verification(record: Record, contracts: dict[str, Record], report: ValidationReport) -> None:
-    contract = contracts.get(record.data.get("contract_id"))
-    if not contract:
-        return
-    allowed = {criterion.get("id") for criterion in contract.data.get("criteria", []) if isinstance(criterion, dict)}
-    unknown = sorted(set(record.data.get("criteria", [])) - allowed)
-    if unknown:
-        report.add("verification.criteria", f"verification references criteria outside its contract: {unknown}", record.path)
-
-
-def _validate_resolution(
-    record: Record,
-    contracts: dict[str, Record],
-    verifications: dict[str, Record],
-    resolution_by_key: dict[tuple[str, str], Record],
-    roots: dict[str | None, Record],
+def _append_record(
+    records: list[Record],
+    path: Path,
+    kind: str,
     report: ValidationReport,
+    *,
+    owner: str | None = None,
 ) -> None:
-    contract = contracts.get(record.data.get("contract_id"))
-    selected: list[Record] = []
-    for verification_id in record.data.get("verification_ids", []):
-        verification = verifications.get(verification_id)
-        if not verification:
-            report.add("reference.missing", f"verification_ids references missing {verification_id}", record.path)
-            continue
-        selected.append(verification)
-        if verification.data.get("work_item") != record.data.get("work_item") or verification.data.get("revision") != record.data.get("revision"):
-            report.add("reference.mismatch", f"verification {verification_id} evaluates another item/revision", record.path)
-        if verification.data.get("contract_id") != record.data.get("contract_id"):
-            report.add("reference.mismatch", f"verification {verification_id} evaluates another contract", record.path)
-        if verification.data.get("outcome") != "PASS":
-            report.add("resolution.verification", f"verification {verification_id} did not PASS", record.path)
-
-    if contract:
-        coverage = {
-            (criterion, verification.data.get("method"))
-            for verification in selected
-            if verification.data.get("outcome") == "PASS"
-            for criterion in verification.data.get("criteria", [])
-        }
-        required = {
-            (criterion.get("id"), method)
-            for criterion in contract.data.get("criteria", [])
-            if isinstance(criterion, dict)
-            for method in criterion.get("methods", [])
-        }
-        missing = sorted(required - coverage)
-        if missing:
-            report.add("resolution.coverage", f"required criterion methods are not covered: {missing}", record.path)
-
-    for reference in record.data.get("consumed_resolutions", []):
-        key = _parse_resolution_ref(reference)
-        if not key or key not in resolution_by_key:
-            report.add("reference.missing", f"consumed_resolutions references missing {reference!r}", record.path)
-
-    decision_record = roots.get("decision_register")
-    decisions = {
-        entry.get("id") for entry in decision_record.data.get("decisions", [])
-        if isinstance(entry, dict)
-    } if decision_record else set()
-    for decision_id in record.data.get("decision_ids", []):
-        if decision_id not in decisions:
-            report.add("reference.missing", f"decision_ids references missing {decision_id}", record.path)
-
-
-def _validate_invalidation(
-    record: Record,
-    work_items: dict[str, Record],
-    resolution_by_key: dict[tuple[str, str], Record],
-    report: ValidationReport,
-) -> None:
-    item_id = record.data.get("work_item")
-    revision = record.data.get("invalidated_revision")
-    if (item_id, revision) not in resolution_by_key:
-        report.add("reference.missing", f"invalidation references unresolved revision {item_id}@{revision}", record.path)
-    transition = work_items.get(record.data.get("transition_item"))
-    if not transition or not transition.data.get("target_node"):
-        report.add("invalidation.transition", "transition_item must reference a revision-transition work item", record.path)
-    for migration_id in record.data.get("migration_items", []):
-        if migration_id not in work_items:
-            report.add("reference.missing", f"migration_items references missing {migration_id}", record.path)
-
-
-def _validate_work_lifecycle(
-    work_items: dict[str, Record],
-    contracts: dict[str, Record],
-    attempts: dict[str, Record],
-    verifications: dict[str, Record],
-    resolution_by_key: dict[tuple[str, str], Record],
-    invalidations: dict[str, Record],
-    roots: dict[str | None, Record],
-    report: ValidationReport,
-) -> None:
-    risks_record = roots.get("risk_register")
-    risk_ids = {
-        entry.get("id") for entry in risks_record.data.get("risks", [])
-        if isinstance(entry, dict)
-    } if risks_record else set()
-    invalidation_by_item = {record.data.get("work_item"): record for record in invalidations.values()}
-
-    for item_id, record in work_items.items():
-        data = record.data
-        state = data.get("state")
-        revision = data.get("active_revision")
-        for risk_id in data.get("risk_ids", []):
-            if risk_id not in risk_ids:
-                report.add("reference.missing", f"risk_ids references missing {risk_id}", record.path)
-
-        contract = _resolve_item_pointer(record, data.get("active_contract"), "revisions", report)
-        if state != "DRAFT" and contract is None:
-            report.add("lifecycle.contract", f"{state} item must point to its active contract", record.path)
-        if contract and contract.data.get("id") not in contracts:
-            report.add("reference.mismatch", "active_contract does not reference a known contract", record.path)
-        if contract and (contract.data.get("work_item"), contract.data.get("revision")) != (item_id, revision):
-            report.add("reference.mismatch", "active_contract does not match the active work-item revision", record.path)
-
-        active_session = data.get("active_session")
-        if active_session is not None and state not in ("IN_PROGRESS", "VERIFYING"):
-            report.add("lifecycle.session", f"active_session must be null when state is {state}", record.path)
-
-        attempt = _resolve_item_pointer(record, data.get("latest_attempt"), "attempts", report)
-        if attempt and attempt.data.get("id") not in attempts:
-            report.add("reference.mismatch", "latest_attempt does not reference a known attempt", record.path)
-        if attempt and (attempt.data.get("work_item"), attempt.data.get("revision")) != (item_id, revision):
-            report.add("reference.mismatch", "latest_attempt does not match the active work-item revision", record.path)
-        verification = _resolve_item_pointer(record, data.get("latest_verification"), "verifications", report)
-        if verification and verification.data.get("id") not in verifications:
-            report.add("reference.mismatch", "latest_verification does not reference a known verification", record.path)
-        if verification and (verification.data.get("work_item"), verification.data.get("revision")) != (item_id, revision):
-            report.add("reference.mismatch", "latest_verification does not match the active work-item revision", record.path)
-
-        if state == "READY":
-            unresolved = sorted(
-                dependency for dependency in data.get("dependencies", [])
-                if dependency in work_items and work_items[dependency].data.get("state") != "RESOLVED"
-            )
-            if unresolved:
-                report.add("lifecycle.ready", f"READY item has unresolved dependencies: {unresolved}", record.path)
-        if state == "DECOMPOSED" and not data.get("children"):
-            report.add("lifecycle.decomposed", "DECOMPOSED item must have children", record.path)
-        if state == "RESOLVED" and (item_id, revision) not in resolution_by_key:
-            report.add("lifecycle.resolved", "RESOLVED item lacks a resolution for its active revision", record.path)
-        if state == "INVALIDATED" and item_id not in invalidation_by_item:
-            report.add("lifecycle.invalidated", "INVALIDATED item lacks INVALIDATION.md", record.path)
-        if state == "REPLACED" and not data.get("replaced_by"):
-            report.add("lifecycle.replaced", "REPLACED item must name its replacement", record.path)
-        if state == "REVISING":
-            transitions = data.get("revision_transitions", [])
-            active = [
-                transition_id for transition_id in transitions
-                if transition_id in work_items and work_items[transition_id].data.get("state") not in TERMINAL_STATES
-            ]
-            if not active:
-                report.add("lifecycle.revising", "REVISING item must have an unresolved revision transition", record.path)
-
-        target_id = data.get("target_node")
-        from_revision = data.get("from_revision")
-        if bool(target_id) != bool(from_revision):
-            report.add("transition.fields", "target_node and from_revision must be set together", record.path)
-        if target_id:
-            target = work_items.get(target_id)
-            if not target:
-                report.add("reference.missing", f"target_node references missing {target_id}", record.path)
-            else:
-                if item_id not in target.data.get("revision_transitions", []):
-                    report.add("graph.backlink", f"{target_id}.revision_transitions must contain {item_id}", record.path)
-                if (target_id, from_revision) not in resolution_by_key:
-                    report.add("transition.source", f"transition source {target_id}@{from_revision} is not resolved", record.path)
-
-        for transition_id in data.get("revision_transitions", []):
-            transition = work_items.get(transition_id)
-            if not transition:
-                report.add("reference.missing", f"revision_transitions references missing {transition_id}", record.path)
-            elif transition.data.get("target_node") != item_id:
-                report.add("reference.mismatch", f"{transition_id} does not target {item_id}", record.path)
-
-
-def _validate_registry_references(
-    roots: dict[str | None, Record],
-    work_items: dict[str, Record],
-    resolution_by_key: dict[tuple[str, str], Record],
-    report: ValidationReport,
-) -> None:
-    risk_record = roots.get("risk_register")
-    if risk_record:
-        for risk in risk_record.data.get("risks", []):
-            if not isinstance(risk, dict):
-                continue
-            for field_name in ("affected_work_items", "mitigation_items"):
-                for item_id in risk.get(field_name, []):
-                    if item_id not in work_items:
-                        report.add(
-                            "reference.missing",
-                            f"risk {risk.get('id')} {field_name} references missing {item_id}",
-                            risk_record.path,
-                        )
-            for reference in risk.get("evidence_refs", []):
-                key = _parse_resolution_ref(reference)
-                if key and key not in resolution_by_key:
-                    report.add(
-                        "reference.missing",
-                        f"risk {risk.get('id')} evidence references missing {reference}",
-                        risk_record.path,
-                    )
-
-    decision_record = roots.get("decision_register")
-    if not decision_record:
-        return
-    decisions = {
-        decision.get("id"): decision
-        for decision in decision_record.data.get("decisions", [])
-        if isinstance(decision, dict) and isinstance(decision.get("id"), str)
-    }
-    for decision_id, decision in decisions.items():
-        if decision.get("status") == "SUPERSEDED" and not decision.get("superseded_by"):
-            report.add(
-                "decision.supersession",
-                f"superseded decision {decision_id} must identify its successor",
-                decision_record.path,
-            )
-        for successor in decision.get("superseded_by", []):
-            if successor not in decisions:
-                report.add(
-                    "reference.missing",
-                    f"decision {decision_id} superseded_by references missing {successor}",
-                    decision_record.path,
-                )
-        for reference in decision.get("resolution_refs", []):
-            key = _parse_resolution_ref(reference)
-            resolution = resolution_by_key.get(key) if key else None
-            if not resolution:
-                report.add(
-                    "reference.missing",
-                    f"decision {decision_id} references missing resolution {reference!r}",
-                    decision_record.path,
-                )
-            elif decision_id not in resolution.data.get("decision_ids", []):
-                report.add(
-                    "reference.mismatch",
-                    f"resolution {reference} must link back to decision {decision_id}",
-                    decision_record.path,
-                )
-
-
-def _resolve_item_pointer(
-    item: Record, pointer: Any, expected_directory: str, report: ValidationReport
-) -> Record | None:
-    if pointer is None:
-        return None
-    if not isinstance(pointer, str) or not _safe_relative(pointer):
-        report.add("reference.path", f"invalid repository-relative pointer {pointer!r}", item.path)
-        return None
-    path = item.path.parent / Path(pointer)
-    try:
-        path.relative_to(item.path.parent)
-    except ValueError:
-        report.add("reference.path", f"pointer escapes work-item directory: {pointer}", item.path)
-        return None
     if not path.is_file():
-        report.add("reference.missing", f"pointer does not exist: {pointer}", item.path)
-        return None
-    if PurePosixPath(pointer).parts[0] != expected_directory:
-        report.add("reference.path", f"pointer must be inside {expected_directory}/", item.path)
-        return None
+        report.add("record.missing", f"required {kind} record is missing", path)
+        return
     try:
-        return Record(path=path, document=parse_file(path))
+        records.append(Record(path=path, kind=kind, document=parse_file(path), owner=owner))
     except (OSError, FrontMatterError) as exc:
         report.add("record.parse", str(exc), path)
-        return None
 
 
-def _validate_project_projections(
-    roots: dict[str | None, Record],
-    work_items: dict[str, Record],
-    resolution_by_key: dict[tuple[str, str], Record],
-    report: ValidationReport,
-) -> None:
-    frontier = roots.get("project_frontier")
-    if frontier:
-        expected = {item_id for item_id, item in work_items.items() if item.data.get("state") not in TERMINAL_STATES}
-        actual = set(frontier.data.get("work_items", []))
-        if actual != expected:
-            report.add(
-                "frontier.projection",
-                f"frontier differs from unresolved graph (missing={sorted(expected - actual)}, extra={sorted(actual - expected)})",
-                frontier.path,
-            )
+def _validate_locations(root: Path, records: list[Record], report: ValidationReport) -> None:
+    for record in records:
+        if record.kind == "project" and record.path != root / "PROJECT.md":
+            report.add("record.location", "project record must be PROJECT.md", record.path)
+        elif record.kind == "work_item":
+            directory = record.path.parent
+            match = WORK_DIR.fullmatch(directory.name)
+            if not match:
+                report.add("record.location", "work-item directory must be WI-NNN-descriptive-title", record.path)
+            elif record.data.get("id") != match.group(1):
+                report.add("record.location", "work-item ID must match its directory prefix", record.path)
+        elif record.kind == "revision":
+            match = REVISION_FILE.fullmatch(record.path.name)
+            if not match:
+                report.add("record.location", "revision filename must be rN-descriptive-title.md", record.path)
+            elif record.data.get("revision") != match.group(1):
+                report.add("record.location", "revision identity must match its filename prefix", record.path)
+        elif record.kind == "session":
+            match = SESSION_FILE.fullmatch(record.path.name)
+            if not match:
+                report.add("record.location", "session filename must be SES-NNN-descriptive-title.md", record.path)
+            elif record.data.get("session") != match.group(1):
+                report.add("record.location", "session identity must match its filename prefix", record.path)
 
-    overview = roots.get("project_overview")
-    if not overview:
+
+def _validate_project_graph(root: Path, records: list[Record], report: ValidationReport) -> None:
+    projects = [record for record in records if record.kind == "project"]
+    if not projects:
         return
-    expected_historical = {f"{item_id}@{revision}" for item_id, revision in resolution_by_key}
-    expected_current = {
-        f"{item_id}@{item.data.get('active_revision')}"
-        for item_id, item in work_items.items()
-        if item.data.get("state") == "RESOLVED"
-        and (item_id, item.data.get("active_revision")) in resolution_by_key
-    }
-    actual_historical = set(overview.data.get("historical_resolutions", []))
-    actual_current = set(overview.data.get("current_resolutions", []))
-    for reference in actual_historical | actual_current:
-        if not _parse_resolution_ref(reference):
-            report.add("overview.reference", f"invalid resolution reference {reference!r}", overview.path)
-    if actual_historical != expected_historical:
-        report.add(
-            "overview.history",
-            f"historical index differs from resolutions (missing={sorted(expected_historical - actual_historical)}, extra={sorted(actual_historical - expected_historical)})",
-            overview.path,
-        )
-    if actual_current != expected_current:
-        report.add(
-            "overview.current",
-            f"current index differs from authoritative resolutions (missing={sorted(expected_current - actual_current)}, extra={sorted(actual_current - expected_current)})",
-            overview.path,
-        )
-    for index, fact in enumerate(overview.data.get("current_facts", [])):
-        if not isinstance(fact, dict):
+    project = projects[0].data
+    if project.get("protocol_version") != PROTOCOL_VERSION:
+        report.add("protocol.version", f"expected protocol {PROTOCOL_VERSION}", projects[0].path)
+
+    items: dict[str, Record] = {}
+    for record in (record for record in records if record.kind == "work_item"):
+        item_id = record.data.get("id")
+        if not isinstance(item_id, str):
             continue
-        claim = fact.get("claim")
-        references = fact.get("resolution_refs", [])
-        supporting_resolutions: list[Record] = []
-        for reference in references:
-            key = _parse_resolution_ref(reference)
-            resolution = resolution_by_key.get(key) if key else None
-            if reference not in actual_current or not resolution:
-                report.add(
-                    "overview.fact",
-                    f"current_facts[{index}] cites non-current resolution {reference!r}",
-                    overview.path,
-                )
+        if item_id in items:
+            report.add("identity.duplicate", f"duplicate work-item identity {item_id}", record.path)
+        else:
+            items[item_id] = record
+
+    root_id = project.get("root_work_item")
+    declared_root = items.get(root_id) if isinstance(root_id, str) else None
+    if declared_root is None:
+        report.add("tree.root", f"declared root {root_id!r} does not exist", projects[0].path)
+    roots = [record for record in items.values() if record.data.get("parent") is None]
+    if len(roots) != 1:
+        report.add("tree.root", f"expected exactly one parentless work item, found {len(roots)}", root / "work-items")
+    elif roots[0].data.get("id") != root_id:
+        report.add("tree.root", "parentless work item must equal PROJECT.md root_work_item", roots[0].path)
+
+    children: dict[str, list[str]] = {item_id: [] for item_id in items}
+    for item_id, record in items.items():
+        parent = record.data.get("parent")
+        if parent is not None:
+            if parent not in items:
+                report.add("tree.parent", f"parent {parent!r} does not exist", record.path)
             else:
-                supporting_resolutions.append(resolution)
-        if supporting_resolutions and not any(
-            claim in resolution.data.get("produced_facts", [])
-            for resolution in supporting_resolutions
-        ):
-            report.add(
-                "overview.fact",
-                f"current_facts[{index}] claim is not produced by a cited resolution",
-                overview.path,
-            )
+                children[parent].append(item_id)
+
+    _validate_cycles(items, report)
+
+    revisions_by_item: dict[str, dict[str, Record]] = {item_id: {} for item_id in items}
+    for record in (record for record in records if record.kind == "revision"):
+        if record.owner not in revisions_by_item:
+            report.add("revision.owner", "revision has no valid owning work item", record.path)
+            continue
+        revision = record.data.get("revision")
+        if not isinstance(revision, str):
+            continue
+        if revision in revisions_by_item[record.owner]:
+            report.add("identity.duplicate", f"duplicate revision {record.owner}@{revision}", record.path)
+        revisions_by_item[record.owner][revision] = record
+
+    for item_id, record in items.items():
+        data = record.data
+        state = data.get("state")
+        active = data.get("active_revision")
+        review_required = data.get("review_required")
+        revisions = revisions_by_item[item_id]
+        _validate_revision_chain(item_id, revisions, report)
+        if state == "in-design":
+            if active is not None:
+                report.add("state.active_revision", "in-design must not have an active revision", record.path)
+            if review_required is not False:
+                report.add("state.review_required", "in-design must not set review_required", record.path)
+        elif state in {"in-working", "resolved"}:
+            if active not in revisions:
+                report.add("state.active_revision", f"{state} must name an existing active revision", record.path)
+            if state == "resolved":
+                if review_required is not False:
+                    report.add("state.review_required", "resolved must not set review_required", record.path)
+                unresolved = [child for child in children[item_id] if items[child].data.get("state") != "resolved"]
+                if unresolved:
+                    report.add("state.resolved_children", f"resolved item has unresolved children: {', '.join(unresolved)}", record.path)
+        if review_required is True and state != "in-working":
+            report.add("state.review_required", "review_required is valid only while in-working", record.path)
+
+    workspace_ids = set(project.get("workspace_ids", [])) if isinstance(project.get("workspace_ids"), list) else set()
+    sessions: dict[str, Record] = {}
+    provider_ids: dict[tuple[str, str], str] = {}
+    for record in (record for record in records if record.kind == "session"):
+        session_id = record.data.get("session")
+        if isinstance(session_id, str):
+            if session_id in sessions:
+                report.add("identity.duplicate", f"duplicate session identity {session_id}", record.path)
+            sessions[session_id] = record
+        key = (str(record.data.get("provider")), str(record.data.get("provider_session_id")))
+        if key in provider_ids:
+            report.add("identity.duplicate", f"provider session is already registered as {provider_ids[key]}", record.path)
+        elif None not in key:
+            provider_ids[key] = str(session_id)
+        for item_id in record.data.get("work_items", []):
+            if item_id not in items:
+                report.add("session.work_item", f"session references missing {item_id}", record.path)
+        workspace_id = record.data.get("workspace_id")
+        if workspace_id not in workspace_ids:
+            report.add("session.workspace", f"workspace {workspace_id!r} is not declared by PROJECT.md", record.path)
 
 
-def _parse_resolution_ref(value: Any) -> tuple[str, str] | None:
-    if not isinstance(value, str):
+def _validate_cycles(items: dict[str, Record], report: ValidationReport) -> None:
+    for item_id in items:
+        seen: set[str] = set()
+        current: str | None = item_id
+        while current in items:
+            if current in seen:
+                report.add("tree.cycle", f"parent cycle includes {current}", items[item_id].path)
+                break
+            seen.add(current)
+            parent = items[current].data.get("parent")
+            current = parent if isinstance(parent, str) else None
+
+
+def _validate_revision_chain(item_id: str, revisions: dict[str, Record], report: ValidationReport) -> None:
+    ordered: list[tuple[int, str, Record]] = []
+    for revision, record in revisions.items():
+        match = re.fullmatch(r"r([1-9][0-9]*)", revision)
+        if match:
+            ordered.append((int(match.group(1)), revision, record))
+    ordered.sort()
+    for index, (number, revision, record) in enumerate(ordered, start=1):
+        if number != index:
+            report.add("revision.sequence", f"{item_id} revisions must be contiguous from r1", record.path)
+        expected = None if number == 1 else f"r{number - 1}"
+        if record.data.get("supersedes") != expected:
+            report.add("revision.chain", f"{revision} must supersede {expected!r}", record.path)
+
+
+def _validate_links(root: Path, records: list[Record], report: ValidationReport) -> None:
+    for record in records:
+        for match in MARKDOWN_LINK.finditer(record.document.body):
+            destination = match.group(1).strip()
+            if destination.startswith("<") and destination.endswith(">"):
+                destination = destination[1:-1]
+            if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", destination) or destination.startswith("mailto:"):
+                continue
+            target_text, separator, anchor = destination.partition("#")
+            target_text = unquote(target_text)
+            target = record.path if not target_text else Path(os.path.normpath(record.path.parent / target_text))
+            try:
+                target.relative_to(root)
+            except ValueError:
+                report.add("link.escape", f"link escapes the canonical project: {destination}", record.path)
+                continue
+            parts = target.relative_to(root).parts
+            if parts and parts[0] == "workspace-links":
+                workspace_id = parts[1] if len(parts) > 1 else ""
+                project_record = next((entry for entry in records if entry.kind == "project"), None)
+                allowed = set(project_record.data.get("workspace_ids", [])) if project_record else set()
+                if workspace_id not in allowed:
+                    report.add("link.workspace", f"link uses undeclared workspace {workspace_id!r}", record.path)
+            if not target.is_file():
+                report.add("link.missing", f"link target does not exist: {destination}", record.path)
+                continue
+            if separator and anchor and not _has_anchor(target, anchor):
+                report.add("link.anchor", f"heading anchor does not exist: {destination}", record.path)
+
+
+def _has_anchor(path: Path, expected: str) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    counts: dict[str, int] = {}
+    anchors: set[str] = set()
+    for match in HEADING.finditer(text):
+        base = _heading_slug(match.group(2))
+        count = counts.get(base, 0)
+        counts[base] = count + 1
+        anchors.add(base if count == 0 else f"{base}-{count}")
+    return unquote(expected).lower() in anchors
+
+
+def _heading_slug(text: str) -> str:
+    text = re.sub(r"[`*_~]", "", text.strip().lower())
+    text = re.sub(r"[^\w\s-]", "", text, flags=re.UNICODE)
+    return re.sub(r"[-\s]+", "-", text).strip("-")
+
+
+def _validate_git_safety(root: Path, report: ValidationReport) -> None:
+    git_root = _git_root(root)
+    if git_root is not None:
+        tracked = _tracked_paths(git_root)
+        for local_name in ("local", "workspace-links"):
+            target = root / local_name
+            try:
+                relative = target.relative_to(git_root).as_posix()
+            except ValueError:
+                continue
+            if any(path == relative or path.startswith(relative + "/") for path in tracked):
+                report.add("git.local_tracked", f"{local_name}/ must not be tracked by Git", target)
+
+    mappings = root / "local" / "workspaces"
+    if not mappings.is_dir():
+        return
+    for mapping in mappings.rglob("*.yaml"):
+        try:
+            payload = json.loads(mapping.read_text(encoding="utf-8"))
+            workspace = Path(payload["path"])
+        except (OSError, KeyError, TypeError, json.JSONDecodeError):
+            continue
+        workspace_git_root = _git_root(workspace)
+        if workspace_git_root is None:
+            continue
+        tracked = _tracked_paths(workspace_git_root)
+        try:
+            selection = (workspace / ".techlead").relative_to(workspace_git_root).as_posix()
+        except ValueError:
+            continue
+        if selection in tracked:
+            report.add("git.selection_tracked", ".techlead selection symlink must not be tracked", workspace / ".techlead")
+
+
+def _git_root(path: Path) -> Path | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
         return None
-    match = RESOLUTION_REF.fullmatch(value)
-    return (match.group(1), match.group(2)) if match else None
+    return Path(result.stdout.strip()).resolve() if result.returncode == 0 else None
 
 
-def _safe_relative(value: str) -> bool:
-    path = PurePosixPath(value)
-    return bool(value) and not path.is_absolute() and ".." not in path.parts
+def _tracked_paths(git_root: Path) -> set[str]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(git_root), "ls-files", "-z"],
+            check=False,
+            capture_output=True,
+        )
+    except OSError:
+        return set()
+    if result.returncode != 0:
+        return set()
+    return {value.decode("utf-8", errors="replace") for value in result.stdout.split(b"\0") if value}
