@@ -95,7 +95,13 @@ def build_parser() -> argparse.ArgumentParser:
     register = subparsers.add_parser("register-session", help="attach a workspace and register a resumable session")
     _location(register)
     register.add_argument("--provider", required=True)
-    register.add_argument("--provider-session-id", required=True)
+    register.add_argument(
+        "--provider-session-id",
+        help=(
+            "real resumable provider session UUID; auto-detected for the current Codex or Claude Code "
+            "session, and never generated"
+        ),
+    )
     register.add_argument("--role", required=True, choices=("design", "exploration", "implementation", "verification", "techlead-review"))
     register.add_argument("--work-item", action="append", required=True, dest="work_items")
     register.add_argument("--workspace", default=".")

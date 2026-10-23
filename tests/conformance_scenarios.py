@@ -94,7 +94,7 @@ def session_continuity() -> list[RecordSpec]:
             {
                 "session": "SES-001",
                 "provider": "codex",
-                "provider_session_id": "opaque-session-1",
+                "provider_session_id": "019f7b6a-4f8b-7c21-9a35-67d0a25481ce",
                 "role": "implementation",
                 "status": "paused",
                 "work_items": ["WI-002", "WI-003"],

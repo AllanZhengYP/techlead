@@ -13,6 +13,7 @@ from urllib.parse import unquote
 
 from .frontmatter import FrontMatterError, ParsedDocument, parse_file
 from .schema import validate_schema
+from .session_identity import SessionIdentityError, validate_provider_session_id
 
 
 PROTOCOL_VERSION = "2.0"
@@ -367,6 +368,10 @@ def _validate_project_graph(root: Path, records: list[Record], report: Validatio
                 report.add("identity.duplicate", f"duplicate session identity {session_id}", record.path)
             sessions[session_id] = record
         key = (str(record.data.get("provider")), str(record.data.get("provider_session_id")))
+        try:
+            validate_provider_session_id(key[0], key[1])
+        except SessionIdentityError as exc:
+            report.add("session.provider_id", str(exc), record.path)
         if key in provider_ids:
             report.add("identity.duplicate", f"provider session is already registered as {provider_ids[key]}", record.path)
         elif None not in key:

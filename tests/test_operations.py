@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools.techlead_state.frontmatter import parse_file
 from tools.techlead_state.operations import (
@@ -262,10 +264,11 @@ class ProtocolOperationsTests(unittest.TestCase):
     def test_session_role_is_stable_and_closed_id_is_not_reused(self) -> None:
         root = self.initialize()
         create_work_item(root, parent="WI-001", title="Implementation", work_type="implementation")
+        codex_session_id = "019f7b6a-4f8b-7c21-9a35-67d0a25481ce"
         first = register_session(
             root,
             provider="codex",
-            provider_session_id="opaque-1",
+            provider_session_id=codex_session_id,
             role="implementation",
             work_items=["WI-001", "WI-002"],
             workspace=self.workspace,
@@ -276,7 +279,7 @@ class ProtocolOperationsTests(unittest.TestCase):
             register_session(
                 root,
                 provider="codex",
-                provider_session_id="opaque-1",
+                provider_session_id=codex_session_id,
                 role="techlead-review",
                 work_items=["WI-001"],
                 workspace=self.workspace,
@@ -284,18 +287,61 @@ class ProtocolOperationsTests(unittest.TestCase):
             )
         close_session(root, session_id="SES-001", registry_path=self.registry)
         root_body = parse_file(next((root / "work-items").glob("WI-001-*/WORK.md"))).body
-        self.assertIn("provider_session_id=opaque-1", root_body)
+        self.assertIn(f"provider_session_id={codex_session_id}", root_body)
 
+        claude_session_id = "8eeb6c21-cdf4-4ad2-b6bb-271f0d9688ab"
         second = register_session(
             root,
             provider="claude-code",
-            provider_session_id="opaque-2",
+            provider_session_id=claude_session_id,
             role="design",
             work_items=["WI-001"],
             workspace=self.workspace,
             registry_path=self.registry,
         )
         self.assertEqual(second["session"], "SES-002")
+
+    def test_session_id_is_auto_detected_and_resume_command_is_returned(self) -> None:
+        root = self.initialize()
+        session_id = "01a169ed-058b-7211-95f0-ac00b0612fae"
+        with patch.dict(os.environ, {"CODEX_THREAD_ID": session_id}, clear=False):
+            result = register_session(
+                root,
+                provider="codex",
+                role="implementation",
+                work_items=["WI-001"],
+                workspace=self.workspace,
+                registry_path=self.registry,
+            )
+        self.assertEqual(result["provider_session_id"], session_id)
+        self.assertEqual(result["resume_command"], f"codex resume {session_id}")
+        self.assertEqual(project_status(root)["sessions"][0]["resume_command"], f"codex resume {session_id}")
+
+    def test_known_provider_rejects_made_up_session_id(self) -> None:
+        root = self.initialize()
+        with self.assertRaisesRegex(OperationError, "not a kiro-cli session UUID"):
+            register_session(
+                root,
+                provider="kiro-cli",
+                provider_session_id="my-helpful-session-name",
+                role="implementation",
+                work_items=["WI-001"],
+                workspace=self.workspace,
+                registry_path=self.registry,
+            )
+
+    def test_custom_provider_keeps_opaque_session_id(self) -> None:
+        root = self.initialize()
+        result = register_session(
+            root,
+            provider="other-provider",
+            provider_session_id="opaque-session-reference",
+            role="implementation",
+            work_items=["WI-001"],
+            workspace=self.workspace,
+            registry_path=self.registry,
+        )
+        self.assertEqual(result["provider_session_id"], "opaque-session-reference")
 
     def test_writer_lock_blocks_competing_mutation(self) -> None:
         root = self.initialize()

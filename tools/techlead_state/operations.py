@@ -24,6 +24,7 @@ from .resolver import (
     resolve_project,
     write_locator,
 )
+from .session_identity import SessionIdentityError, resolve_provider_session_id, resume_command
 from .validator import ValidationReport, validate_project
 
 
@@ -375,7 +376,7 @@ def register_session(
     project: str | Path,
     *,
     provider: str,
-    provider_session_id: str,
+    provider_session_id: str | None = None,
     role: str,
     work_items: list[str],
     workspace: str | Path,
@@ -388,6 +389,10 @@ def register_session(
 ) -> dict[str, Any]:
     if role not in {"design", "exploration", "implementation", "verification", "techlead-review"}:
         raise OperationError(f"unsupported session role: {role}")
+    try:
+        provider_session_id = resolve_provider_session_id(provider, provider_session_id)
+    except SessionIdentityError as exc:
+        raise OperationError(str(exc)) from exc
     initial_root = _resolve_direct(project, registry_path=registry_path).project_root
     initial_existing = next(
         (
@@ -462,7 +467,7 @@ def register_session(
         body = existing.document.body if existing is not None and not note else (
             f"# {session_id} — {session_title.replace('-', ' ').title()}\n\n{note}\n" if note else ""
         )
-        return {relative: dump_document(metadata, body)}, {
+        result = {
             "session": session_id,
             "provider": provider,
             "provider_session_id": provider_session_id,
@@ -470,6 +475,10 @@ def register_session(
             "work_items": metadata["work_items"],
             "workspace_id": workspace_id,
         }
+        command = resume_command(provider, provider_session_id)
+        if command is not None:
+            result["resume_command"] = command
+        return {relative: dump_document(metadata, body)}, result
 
     result = _mutate(root, "register-session", build)
     _write_session_mapping(root, result["session"], Path(workspace), workspace_id)
@@ -585,7 +594,7 @@ def project_status(
             for item in sorted(items.values(), key=lambda value: _numeric_id(value.item_id))
         ],
         "sessions": [
-            {**session.document.metadata, "path": str(session.path)}
+            _session_projection(session)
             for session in sorted(sessions.values(), key=lambda value: _numeric_id(value.document.metadata["session"]))
         ],
     }
@@ -685,6 +694,17 @@ def _load_sessions(root: Path) -> dict[str, SessionRecord]:
         session_id = document.metadata.get("session")
         if isinstance(session_id, str):
             result[session_id] = SessionRecord(path=path, document=document)
+    return result
+
+
+def _session_projection(session: SessionRecord) -> dict[str, Any]:
+    result = {**session.document.metadata, "path": str(session.path)}
+    command = resume_command(
+        str(session.document.metadata["provider"]),
+        str(session.document.metadata["provider_session_id"]),
+    )
+    if command is not None:
+        result["resume_command"] = command
     return result
 
 

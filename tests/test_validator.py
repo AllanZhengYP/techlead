@@ -72,6 +72,16 @@ class ValidatorConformanceTests(unittest.TestCase):
             codes = {issue.code for issue in validate_project(root).issues}
         self.assertIn("state.active_revision", codes)
 
+    def test_known_provider_session_id_must_be_real_uuid(self) -> None:
+        records = copy_scenario("session-continuity")
+        session = next(metadata for path, metadata, _body in records if path.startswith("sessions/"))
+        session["provider_session_id"] = "made-up-session"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            render_scenario(root, records)
+            issues = validate_project(root).issues
+        self.assertTrue(any(issue.code == "session.provider_id" for issue in issues))
+
     def test_resolved_parent_requires_resolved_children(self) -> None:
         records = copy_scenario("signed-decomposition")
         parent = next(metadata for path, metadata, _body in records if "WI-001-" in path and path.endswith("WORK.md"))
