@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "techlead",
   "displayName": "Tech Lead Agent",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Explicit design bar-raising and a durable Protocol 2.0 work-item log.",
   "author": {
     "name": "Tech Lead Agent contributors",

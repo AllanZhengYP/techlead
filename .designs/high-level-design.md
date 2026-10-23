@@ -6,28 +6,36 @@
 
 ## 1. Design decisions
 
-The project ships as two installable, versioned plugins:
+The project ships as three installable, versioned adapters:
 
 1. a Codex plugin;
-2. a Claude Code plugin.
+2. a Claude Code plugin; and
+3. a Kiro Power in the Agent Plugins format.
 
-They implement one shared workflow and repository-state contract but use the native extension and agent-invocation mechanisms of each host. A plugin is the distribution package; Codex or Claude Code remains the runtime.
+They implement one shared workflow and repository-state contract but use the
+native extension and agent-invocation mechanisms of each host. The adapter is
+the distribution package; Codex, Claude Code, or Kiro remains the runtime.
 
 The PoC does not ship a service, daemon, database, scheduler, or custom agent loop. It also does not require an MCP server. The harnesses already provide the local model loop, repository tools, shell and Git access, isolated agent contexts, permission handling, session interaction, and human steering needed to test the vision.
 
 ## 2. What we ship
 
-The product is the plugin pair, not a new coding harness. A release contains:
+The product is the adapter set, not a new coding harness. A release contains:
 
 - one installable Codex plugin;
 - one installable Claude Code plugin;
-- a versioned, provider-neutral `.techlead/` state protocol shared by both;
+- one installable Kiro Power;
+- a versioned, provider-neutral `.techlead/` state protocol shared by all;
 - deterministic validation code and conformance fixtures embedded in each plugin;
 - documentation and a small example project demonstrating the full PoC workflow.
 
-The two plugins should normally share a release version. Each initialized project records its state-protocol version so a plugin can reject an incompatible project or perform an explicit migration rather than reinterpret old records silently.
+The adapters should normally share a release version. Each initialized project
+records its state-protocol version so an adapter can reject an incompatible
+project or perform an explicit migration rather than reinterpret old records
+silently.
 
-The source repository produces two self-contained plugin artifacts from a shared semantic core:
+The source repository produces three self-contained artifacts from a shared
+semantic core:
 
 ```text
 techlead-agent/
@@ -42,6 +50,10 @@ techlead-agent/
 │   │   └── skills/
 │   └── claude-techlead/
 │       ├── .claude-plugin/plugin.json
+│       └── skills/
+├── powers/
+│   └── techlead/
+│       ├── plugin.json       # Kiro Power / Agent Plugin manifest
 │       └── skills/
 └── tools/
     └── techlead-state         # local deterministic helper
@@ -74,8 +86,9 @@ or decide project meaning.
 Invocation stays concise and host-native. Codex uses explicit skill mentions
 such as `$review-work`, `$create-work-item`, and `$work-log`. Claude Code uses
 the plugin namespace required by that host, such as
-`/techlead:review-work`. Implicit or model-initiated invocation is disabled
-for every Tech Lead skill.
+`/techlead:review-work`. Kiro exposes `/review-work`, `/create-work-item`, and
+`/work-log`. Every adapter's skill contract rejects implicit or model-initiated
+activation.
 
 ### Multi-project control root and attached workspaces
 
@@ -128,7 +141,8 @@ project_ids:
 
 `.techlead-project` contains no machine-specific path. A local registry maps
 each project UUID to its canonical log root. This is one provider-neutral
-per-user registry shared by Codex and Claude, stored in the platform's local
+per-user registry shared by Codex, Claude Code, and Kiro, stored in the
+platform's local
 user-state location and never committed. `init` registers its new project;
 `attach --control-dir <path>` scans that root and registers matching UUIDs on a
 new machine. Before following a mapping, the resolver verifies that the target
@@ -485,6 +499,15 @@ worker, verifier, or sub-tech-lead agent definitions. Claude Code sessions used
 for implementation or verification remain independently launched external
 sessions whose IDs and results may be recorded in the shared log.
 
+### Kiro Power
+
+The Kiro artifact packages the same three skills as a portable Agent Plugin.
+Each skill carries a skill-local launcher and references while sharing the
+Power's packaged deterministic helper, schemas, and templates. Kiro CLI
+sessions use provider `kiro-cli` and the real UUID reported by `/session-id` so
+the work log can emit an exact resume command. The Power does not add an MCP
+server, hook, worker, verifier, or sub-tech-lead agent.
+
 ## 7. Hooks and MCP policy
 
 The PoC ships no hooks. `$review-work`, `$create-work-item`, and mutating
@@ -497,7 +520,8 @@ An MCP server is intentionally absent from the PoC. Local files and built-in har
 
 ## 8. Compatibility contract
 
-Provider parity means equivalent outcomes, not identical files or prompts. Both plugins must preserve:
+Provider parity means equivalent outcomes, not identical files or prompts. All
+adapters must preserve:
 
 - the canonical project-log format exposed to an attached workspace as
   `.techlead/`;
@@ -520,13 +544,15 @@ architecture without redefining its product boundaries or protocol semantics.
 
 ## 10. PoC implementation decisions
 
-- **Provider order:** Implement the Claude Code plugin first, followed by Codex. The first adapter is a development vehicle, not the semantic reference.
+- **Provider order:** Implement the Claude Code plugin first, followed by Codex
+  and the Kiro Power. The first adapter is a development vehicle, not the
+  semantic reference.
 - **User-facing entry points:** Expose only `$review-work`,
   `$create-work-item`, and `$work-log` in Codex. `$work-log` provides explicit
   `init`, `status`, `next`, `attach`, `register-session`, `pause-session`,
   `close-session`, and `validate` actions; it does not transition work-item
   state. Claude Code exposes equivalent names through its required plugin
-  namespace.
+  namespace. Kiro exposes the equivalent slash commands through Agent Skills.
 - **State representation:** Use Markdown records with YAML frontmatter. A
   `WORK.md` frontmatter envelope contains only `id`, `title`, `work_type`,
   `state`, `parent`, `active_revision`, and `review_required`. Its free-form

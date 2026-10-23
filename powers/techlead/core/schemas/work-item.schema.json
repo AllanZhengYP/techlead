@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Tech Lead work item",
+  "type": "object",
+  "required": ["id", "title", "work_type", "state", "parent", "active_revision", "review_required"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^WI-[0-9]{3,}$"},
+    "title": {"type": "string", "minLength": 1},
+    "work_type": {"enum": ["design", "exploration", "implementation", "verification"]},
+    "state": {"enum": ["in-design", "in-working", "resolved"]},
+    "parent": {"type": ["string", "null"], "pattern": "^WI-[0-9]{3,}$"},
+    "active_revision": {"type": ["string", "null"], "pattern": "^r[1-9][0-9]*$"},
+    "review_required": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

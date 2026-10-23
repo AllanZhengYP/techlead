@@ -131,8 +131,9 @@ Lead. The human explicitly chooses one of three capabilities:
   register or update sessions, or validate state without transitioning an item.
 
 Codex exposes these concisely as `$review-work`, `$create-work-item`, and
-`$work-log`. Other hosts preserve the same capabilities through their native
-invocation conventions.
+`$work-log`. Claude Code exposes namespaced slash commands, and Kiro exposes
+`/review-work`, `/create-work-item`, and `/work-log`. Other hosts preserve the
+same capabilities through their native invocation conventions.
 
 Creating an item always initializes it as `in-design` with no active revision
 and no pending re-review flag. Creation does not inherit the parent's sign-off
@@ -337,7 +338,7 @@ is supplied, Tech Lead asks the human rather than guessing. Machine-local paths,
 symlinks, and generated snapshots are never committed.
 
 A single provider-neutral per-user registry maps project UUIDs to their current
-project-directory paths for both Codex and Claude. `init` populates it;
+project-directory paths for Codex, Claude Code, and Kiro. `init` populates it;
 `attach --control-dir <path>` discovers and registers projects on another
 machine. The resolver verifies each target `PROJECT.md` UUID before use. The
 registry is machine-local, never committed, and repairable after a directory is

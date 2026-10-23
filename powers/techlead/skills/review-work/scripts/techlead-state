@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Skill-local launcher for the Power's shared techlead_state package."""
+
+from pathlib import Path
+import sys
+
+
+POWER_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(POWER_ROOT / "bin"))
+
+from techlead_state.cli import main  # noqa: E402
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

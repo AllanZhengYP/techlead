@@ -1,0 +1,10 @@
+{
+  "protocol_version": "2.0",
+  "schemas": {
+    "project": "project.schema.json",
+    "work_item": "work-item.schema.json",
+    "revision": "revision.schema.json",
+    "session": "session.schema.json",
+    "workspace_locator": "workspace-locator.schema.json"
+  }
+}

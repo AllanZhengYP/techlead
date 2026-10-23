@@ -17,13 +17,29 @@ from tests.test_validator import render_scenario
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CLAUDE_ROOT = REPOSITORY_ROOT / "plugins" / "claude-techlead"
 CODEX_ROOT = REPOSITORY_ROOT / "plugins" / "codex-techlead"
+KIRO_ROOT = REPOSITORY_ROOT / "powers" / "techlead"
+ADAPTER_ROOTS = (CLAUDE_ROOT, CODEX_ROOT, KIRO_ROOT)
 
 
 class PluginParityTests(unittest.TestCase):
-    def test_both_provider_adapters_exist(self) -> None:
+    def test_all_provider_adapters_exist(self) -> None:
         self.assertTrue((CLAUDE_ROOT / ".claude-plugin" / "plugin.json").is_file())
         self.assertTrue((CODEX_ROOT / "plugin.json").is_file())
         self.assertTrue((CODEX_ROOT / ".codex-plugin" / "plugin.json").is_file())
+        self.assertTrue((KIRO_ROOT / "plugin.json").is_file())
+
+    def test_all_provider_adapters_share_one_release_version(self) -> None:
+        manifests = (
+            CLAUDE_ROOT / ".claude-plugin" / "plugin.json",
+            CODEX_ROOT / "plugin.json",
+            CODEX_ROOT / ".codex-plugin" / "plugin.json",
+            KIRO_ROOT / "plugin.json",
+        )
+        versions = {
+            json.loads(path.read_text(encoding="utf-8"))["version"]
+            for path in manifests
+        }
+        self.assertEqual(len(versions), 1)
 
     def test_packaged_shared_files_are_synchronized(self) -> None:
         result = subprocess.run(
@@ -44,7 +60,7 @@ class PluginParityTests(unittest.TestCase):
         self.assertEqual(marketplace["plugins"][0]["source"], "./plugins/claude-techlead")
 
     def test_packaged_validators_run_without_source_tree_imports(self) -> None:
-        for plugin_root in (CLAUDE_ROOT, CODEX_ROOT):
+        for plugin_root in ADAPTER_ROOTS:
             with self.subTest(plugin=plugin_root.name), tempfile.TemporaryDirectory() as temporary:
                 project = Path(temporary)
                 render_scenario(project, copy_scenario("exception-rollup"))
@@ -67,7 +83,7 @@ class PluginParityTests(unittest.TestCase):
 
     def test_packaged_helpers_produce_equivalent_canonical_state(self) -> None:
         projections = []
-        for plugin_root in (CLAUDE_ROOT, CODEX_ROOT):
+        for plugin_root in ADAPTER_ROOTS:
             with self.subTest(plugin=plugin_root.name), tempfile.TemporaryDirectory() as temporary:
                 base = Path(temporary)
                 workspace = base / "workspace"
@@ -138,7 +154,8 @@ class PluginParityTests(unittest.TestCase):
                     }
                     for item in payload["work_items"]
                 ])
-        self.assertEqual(projections[0], projections[1])
+        for projection in projections[1:]:
+            self.assertEqual(projections[0], projection)
 
     def test_release_archive_is_deterministic_and_installable_shape(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -201,9 +218,56 @@ class PluginParityTests(unittest.TestCase):
             self.assertIn("codex-techlead/skills/review-work/SKILL.md", names)
             self.assertIn("codex-techlead/bin/techlead-state", names)
 
+    def test_kiro_release_archive_is_deterministic_and_installable_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            first = Path(temporary) / "first.zip"
+            second = Path(temporary) / "second.zip"
+            for output in (first, second):
+                result = subprocess.run(
+                    [sys.executable, "tools/package_kiro_power.py", "--output", str(output)],
+                    cwd=REPOSITORY_ROOT,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            with zipfile.ZipFile(first) as archive:
+                names = set(archive.namelist())
+            self.assertIn("techlead/plugin.json", names)
+            self.assertIn("techlead/skills/review-work/SKILL.md", names)
+            self.assertIn("techlead/skills/review-work/scripts/techlead-state", names)
+            self.assertIn("techlead/skills/review-work/references/PROTOCOL.md", names)
+            self.assertIn("techlead/bin/techlead-state", names)
+
+    def test_kiro_power_passes_publish_validation(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "tools/validate_kiro_power.py", str(KIRO_ROOT)],
+            cwd=REPOSITORY_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_kiro_skill_local_launcher_runs_outside_the_power(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            render_scenario(project, copy_scenario("exception-rollup"))
+            launcher = KIRO_ROOT / "skills" / "review-work" / "scripts" / "techlead-state"
+            result = subprocess.run(
+                [sys.executable, str(launcher), "validate", str(project), "--format", "json"],
+                cwd=project,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(json.loads(result.stdout)["valid"])
+
     def test_each_adapter_exposes_exactly_three_explicit_skills(self) -> None:
         expected = {"review-work", "create-work-item", "work-log"}
-        for plugin_root in (CLAUDE_ROOT, CODEX_ROOT):
+        for plugin_root in ADAPTER_ROOTS:
             with self.subTest(plugin=plugin_root.name):
                 skills = {path.parent.name for path in (plugin_root / "skills").glob("*/SKILL.md")}
                 self.assertEqual(skills, expected)
@@ -211,6 +275,13 @@ class PluginParityTests(unittest.TestCase):
                 self.assertFalse((plugin_root / "hooks").exists())
                 for skill in (plugin_root / "skills").glob("*/SKILL.md"):
                     self.assertNotIn("TODO", skill.read_text(encoding="utf-8"))
+
+    def test_kiro_skills_use_manual_slash_invocation(self) -> None:
+        for skill in (KIRO_ROOT / "skills").glob("*/SKILL.md"):
+            text = skill.read_text(encoding="utf-8")
+            self.assertIn(f"/{skill.parent.name}", text)
+            self.assertIn("manual-only", text)
+            self.assertNotIn(f"${skill.parent.name}", text)
 
     def test_protocol_2_removes_old_record_families(self) -> None:
         schema_names = {path.name for path in (REPOSITORY_ROOT / "core" / "schemas").glob("*.json")}
@@ -225,7 +296,7 @@ class PluginParityTests(unittest.TestCase):
                 "workspace-locator.schema.json",
             },
         )
-        for plugin_root in (CLAUDE_ROOT, CODEX_ROOT):
+        for plugin_root in ADAPTER_ROOTS:
             self.assertFalse((plugin_root / "core" / "roles").exists())
 
 

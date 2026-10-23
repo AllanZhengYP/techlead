@@ -1,17 +1,17 @@
 # Tech Lead Agent
 
-A local-first design-review bar-raiser and durable work-item log for Codex and
-Claude Code. Tech Lead is explicitly invoked; implementation and independent
-verification remain in the user's tools and sessions of choice.
+A local-first design-review bar-raiser and durable work-item log for Codex,
+Claude Code, and Kiro. Tech Lead is explicitly invoked; implementation and
+independent verification remain in the user's tools and sessions of choice.
 
 The product behavior is defined by the [vision](.designs/vision.md),
 [high-level design](.designs/high-level-design.md), and
-[low-level design](.designs/low-level-design.md). Both provider plugins use the
+[low-level design](.designs/low-level-design.md). All provider adapters use the
 same dependency-free [Protocol 2.0](core/protocol/PROTOCOL.md) engine.
 
 ## Capabilities
 
-Both adapters expose exactly three capabilities:
+Every adapter exposes exactly three capabilities:
 
 - `review-work`: bar-raise an `in-design` item, assess a supplied `in-working`
   outcome, or synthesize child verdicts;
@@ -21,7 +21,8 @@ Both adapters expose exactly three capabilities:
 
 Codex invokes them as `$review-work`, `$create-work-item`, and `$work-log`.
 Claude Code invokes `/techlead:review-work`, `/techlead:create-work-item`, and
-`/techlead:work-log`. Implicit invocation is disabled.
+`/techlead:work-log`. Kiro invokes `/review-work`, `/create-work-item`, and
+`/work-log`. Implicit invocation is rejected by each skill.
 
 ## Plugin artifacts
 
@@ -34,8 +35,25 @@ claude plugin install techlead@techlead --scope user
 
 The Codex adapter is the portable plugin at `plugins/codex-techlead`; add it to
 the desired personal, repository, or team marketplace when testing locally.
-Tagged releases publish deterministic `techlead-claude.zip` and
-`techlead-codex.zip` archives with SHA-256 sidecars. The Claude release also
+
+The beta Kiro Power is the Agent Plugins package at `powers/techlead`. From the
+Kiro IDE, open **Powers → Add Custom Power → Import power from GitHub** and use:
+
+```text
+https://github.com/AllanZhengYP/techlead/tree/main/powers/techlead
+```
+
+For a remote Kiro CLI v3 machine, clone the repository and install the local
+Power path:
+
+```sh
+git clone https://github.com/AllanZhengYP/techlead.git
+kiro-cli powers install "$(pwd)/techlead/powers/techlead"
+```
+
+The Kiro adapter requires Python 3.10 or newer. Tagged releases publish
+deterministic `techlead-claude.zip`, `techlead-codex.zip`, and
+`techlead-kiro.zip` archives with SHA-256 sidecars. The Claude release also
 includes its archive-backed marketplace descriptor.
 
 ## Initialize and inspect a project
@@ -87,6 +105,7 @@ decision; it does not decide whether a design or result is acceptable.
 python3 tools/sync_claude_plugin.py --check
 python3 -m unittest discover -v
 python3 /path/to/plugin-creator/scripts/validate_plugin.py plugins/codex-techlead
+python3 tools/validate_kiro_power.py powers/techlead
 claude plugin validate plugins/claude-techlead
 ```
 
@@ -97,5 +116,6 @@ python3 tools/sync_claude_plugin.py
 ```
 
 Despite its historical filename, that command synchronizes the shared core into
-both provider plugins. Package release artifacts with
-`tools/package_claude_plugin.py` and `tools/package_codex_plugin.py`.
+all provider adapters. Package release artifacts with
+`tools/package_claude_plugin.py`, `tools/package_codex_plugin.py`, and
+`tools/package_kiro_power.py`.

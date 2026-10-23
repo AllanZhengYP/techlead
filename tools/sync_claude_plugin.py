@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize provider-neutral files into both self-contained plugins."""
+"""Synchronize provider-neutral files into every self-contained adapter."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ import shutil
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ROOT = REPOSITORY_ROOT / "plugins" / "claude-techlead"
 CODEX_PLUGIN_ROOT = REPOSITORY_ROOT / "plugins" / "codex-techlead"
-PLUGIN_ROOTS = (PLUGIN_ROOT, CODEX_PLUGIN_ROOT)
+KIRO_POWER_ROOT = REPOSITORY_ROOT / "powers" / "techlead"
+PLUGIN_ROOTS = (PLUGIN_ROOT, CODEX_PLUGIN_ROOT, KIRO_POWER_ROOT)
 
 
 def synchronized_files() -> list[tuple[Path, Path]]:
@@ -32,6 +33,18 @@ def synchronized_files() -> list[tuple[Path, Path]]:
                 plugin_root / "conformance" / "conformance_scenarios.py",
             ),
         ])
+    for skill_name in ("create-work-item", "review-work", "work-log"):
+        references = KIRO_POWER_ROOT / "skills" / skill_name / "references"
+        pairs.extend([
+            (
+                REPOSITORY_ROOT / "core" / "protocol" / "PROTOCOL.md",
+                references / "PROTOCOL.md",
+            ),
+            (
+                REPOSITORY_ROOT / "core" / "behaviors" / f"{skill_name}.md",
+                references / f"{skill_name}.md",
+            ),
+        ])
     return pairs
 
 
@@ -46,6 +59,10 @@ def sync(*, check: bool) -> list[str]:
             plugin_root / "conformance",
         ])
         managed.append(plugin_root / "bin" / "techlead-state")
+    managed.extend(
+        KIRO_POWER_ROOT / "skills" / skill_name / "references"
+        for skill_name in ("create-work-item", "review-work", "work-log")
+    )
     extras: list[Path] = []
     for path in managed:
         if path.is_file():

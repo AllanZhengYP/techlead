@@ -1,4 +1,4 @@
-name: Release Tech Lead plugins
+name: Release Tech Lead adapters
 
 on:
   push:
@@ -22,6 +22,7 @@ jobs:
         run: |
           python -m unittest discover -v
           python tools/sync_claude_plugin.py --check
+          python tools/validate_kiro_power.py powers/techlead
           python tools/package_claude_plugin.py \
             --expected-version "${GITHUB_REF_NAME#v}" \
             --output "dist/techlead-claude.zip" \
@@ -30,6 +31,9 @@ jobs:
           python tools/package_codex_plugin.py \
             --expected-version "${GITHUB_REF_NAME#v}" \
             --output "dist/techlead-codex.zip"
+          python tools/package_kiro_power.py \
+            --expected-version "${GITHUB_REF_NAME#v}" \
+            --output "dist/techlead-kiro.zip"
 
       - name: Publish GitHub Release assets
         env:
@@ -41,5 +45,7 @@ jobs:
             "dist/techlead-claude-marketplace.json" \
             "dist/techlead-codex.zip" \
             "dist/techlead-codex.zip.sha256" \
+            "dist/techlead-kiro.zip" \
+            "dist/techlead-kiro.zip.sha256" \
             --generate-notes \
             --verify-tag

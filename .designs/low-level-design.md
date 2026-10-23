@@ -239,6 +239,19 @@ ignoring allowed provider-specific presentation and session metadata. A
 provider adapter may not introduce a state, record type, or transition absent
 from the shared protocol.
 
+### 1.9 Phase 8 — Kiro Power and parity
+
+Package the same three capabilities as `/review-work`, `/create-work-item`, and
+`/work-log` in an Agent Plugins v1 Power. Preserve explicit-only activation in
+the skill metadata and body, keep each skill self-contained with relative
+scripts and references, and package the shared helper, schemas, and templates
+inside the Power. Publish the Power from a public GitHub package directory and
+include a deterministic release archive for local-path installation.
+
+Run the same canonical-state scenarios through the packaged Kiro helper. Kiro
+CLI sessions use the exact `/session-id` UUID and provider-specific resume
+command; those presentation details do not alter the shared protocol.
+
 ## 2. Use-case implementation and acceptance matrix
 
 | Use case | Implementation path | Acceptance evidence |
@@ -258,7 +271,7 @@ from the shared protocol.
 | Handle concurrent Tech Lead sessions | Every mutation uses the project lock, precondition re-read, overlay validation, safe replacement, and rollback; readers respect an active writer. | Simultaneous ID allocation cannot collide and a reader never reports a partially rolled-up state. |
 | Preserve terminal history | Validator prevents unresolved descendants or new children under `resolved`; later work links the old item from an open ancestor or new project. | No `resolved` item transitions backward. |
 | Keep Git optional and state clean | All behavior uses current files; ignore/index checks protect local artifacts; no operation stages or commits. | Complete scenario passes outside a Git repository and produces no Git side effects inside one. |
-| Preserve provider parity | Claude and Codex adapters execute the same fixture narratives against the same helper. | Their canonical project trees and transition outcomes are semantically equivalent. |
+| Preserve provider parity | Claude, Codex, and Kiro adapters execute the same fixture narratives against the same helper. | Their canonical project trees and transition outcomes are semantically equivalent. |
 
 ## 3. Test and release gates
 
@@ -280,8 +293,8 @@ The implementation is complete only when all of these layers pass:
    worktrees, review and sign a root, run parallel external sessions, record a
    contradictory result, complete all children, run the parent review, and
    resume a recorded session.
-6. **Provider-parity gate:** repeat the same narrative in Claude Code and Codex
-   and compare the resulting canonical state.
+6. **Provider-parity gate:** repeat the same narrative in Claude Code, Codex,
+   and Kiro and compare the resulting canonical state.
 7. **Documentation gate:** update README, installation instructions, examples,
    and upgrade diagnostics; remove all references to the old orchestrator,
    graph states, delegated agents, and pivot workflow.
