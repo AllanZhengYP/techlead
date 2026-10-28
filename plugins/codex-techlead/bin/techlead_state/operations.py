@@ -929,9 +929,34 @@ def _install_attachment(
     _install_git_exclude(workspace, ".techlead")
 
 
+def _reserved_workspace_roots() -> list[Path]:
+    """Directories a workspace must never be attached inside.
+
+    Agent hosts watch their config directories, and attaching there links a
+    project (whose ``workspace-links`` point back at real workspaces) into a
+    watched tree, creating a symlink loop the host may follow without bound.
+    """
+    home = Path.home()
+    roots = [home / ".kiro", home / ".claude", home / ".codex"]
+    for variable in ("KIRO_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"):
+        value = os.environ.get(variable)
+        if value:
+            roots.append(Path(value))
+    package = Path(__file__).resolve().parent
+    if package.parent.name == "bin":  # installed adapter: <plugin>/bin/techlead_state
+        roots.append(package.parent.parent)
+    return [root.expanduser().resolve() for root in roots]
+
+
 def _preflight_attachment(root: Path, workspace: Path, workspace_id: str) -> None:
     if not workspace.is_dir():
         raise OperationError(f"workspace does not exist: {workspace}")
+    for reserved in _reserved_workspace_roots():
+        if workspace.is_relative_to(reserved):
+            raise OperationError(
+                f"refusing to attach {workspace}: it is inside {reserved}, an agent config or "
+                "plugin install directory; pass --workspace with the repository or worktree root"
+            )
     locator = workspace / ".techlead-project"
     if locator.is_file():
         existing = read_locator(locator)

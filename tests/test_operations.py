@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from tools.techlead_state.cli import build_parser
 from tools.techlead_state.frontmatter import parse_file
 from tools.techlead_state.operations import (
     OperationError,
@@ -105,6 +106,29 @@ class ProtocolOperationsTests(unittest.TestCase):
         second = self.initialize(name="second-project", title="Second")
         self.assertEqual((self.workspace / ".techlead").resolve(), second)
         self.assertEqual((clone / ".techlead").resolve(), first)
+
+    def test_attachment_refuses_agent_config_directories(self) -> None:
+        root = self.initialize()
+        kiro_home = self.base / "kiro-home"
+        skill_dir = kiro_home / "powers" / "installed" / "techlead" / "skills" / "work-log"
+        skill_dir.mkdir(parents=True)
+        with patch.dict(os.environ, {"KIRO_HOME": str(kiro_home)}):
+            with self.assertRaisesRegex(OperationError, "agent config or plugin install directory"):
+                attach_workspace(root, skill_dir, workspace_id="service-a", registry_path=self.registry)
+        self.assertFalse((skill_dir / ".techlead").is_symlink())
+        self.assertFalse((skill_dir / ".techlead-project").exists())
+        self.assertEqual((root / "workspace-links" / "service-a").resolve(), self.workspace.resolve())
+
+    def test_attaching_commands_never_default_workspace_to_cwd(self) -> None:
+        commands = (
+            ["init", "--control-dir", "c", "--name", "n", "--title", "t", "--root", "r", "--workspace-id", "w"],
+            ["repair-attachment", "p"],
+            ["register-session", "p", "--provider", "kiro-cli", "--role", "design", "--work-item", "WI-001"],
+        )
+        for argv in commands:
+            with self.subTest(command=argv[0]), patch("sys.stderr"), self.assertRaises(SystemExit):
+                build_parser().parse_args(argv)
+        self.assertIsNone(build_parser().parse_args(["attach", "p"]).workspace)
 
     def test_child_creation_is_unsigned_and_resolved_parent_is_terminal(self) -> None:
         root = self.initialize()

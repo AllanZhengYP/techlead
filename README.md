@@ -156,6 +156,7 @@ omit the ID and let the helper read `CODEX_THREAD_ID` or
 
 ```sh
 tools/techlead-state register-session /path/to/service-workspace \
+  --workspace /path/to/service-workspace \
   --provider codex \
   --role implementation \
   --work-item WI-002

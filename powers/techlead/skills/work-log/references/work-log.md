@@ -17,7 +17,10 @@ review is pending.
 
 Workspace attachment and session identity are distinct. Registration may
 attach or repair the supplied workspace, and one session may cover several work
-items. Git branch and revision are optional hints. Local symlinks, mappings,
+items. `init`, `attach`, `repair-attachment`, and `register-session` require an
+explicit `--workspace`: pass the absolute root of the human's repository or
+worktree, never the skill or plugin directory. If that root is unclear, ask.
+Git branch and revision are optional hints. Local symlinks, mappings,
 locks, and snapshots must remain untracked.
 
 For `register-session`, record only the provider's real resumable session ID.

@@ -10,11 +10,13 @@ This is a manual-only workflow. If the human did not directly invoke
 `/work-log`, do not mutate or interpret the Tech Lead work log; ask them to
 invoke the skill explicitly.
 
-From this skill directory, read `references/work-log.md` and
-`references/PROTOCOL.md`. Route deterministic actions through the packaged
-helper using a Python 3.10+ interpreter as `python3 scripts/techlead-state` (or
-the platform-equivalent Python 3 command). Never use this skill to transition
-work-item state.
+Read `references/work-log.md` and `references/PROTOCOL.md` from this skill
+directory. Route deterministic actions through the packaged helper using a
+Python 3.10+ interpreter as `python3 <skill-dir>/scripts/techlead-state` (or the
+platform-equivalent Python 3 command), invoked by absolute path from the human's
+workspace rather than from this skill directory. Always pass `--workspace` with
+the absolute root of the human's repository or worktree. Never use this skill
+to transition work-item state.
 
 For `next`, load the deterministic projection and then inspect the signed start
 conditions, current findings, coordination context, and live sessions. Return

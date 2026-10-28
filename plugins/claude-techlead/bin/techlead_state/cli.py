@@ -44,14 +44,14 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--name", required=True)
     init.add_argument("--title", required=True)
     init.add_argument("--root", required=True, dest="root_title", help="root work-item title")
-    init.add_argument("--workspace", default=".")
+    init.add_argument("--workspace", required=True, help="repository or worktree root to attach; never defaults to the current directory")
     init.add_argument("--workspace-id", required=True)
     _registry(init)
 
     attach = subparsers.add_parser("attach", help="attach or repair a workspace")
     _location(attach)
     attach.add_argument("--project", help="explicit canonical project root")
-    attach.add_argument("--workspace", default=".")
+    attach.add_argument("--workspace", help="repository or worktree root to attach; never defaults to the current directory; required unless --scan-only")
     attach.add_argument("--workspace-id")
     attach.add_argument("--control-dir", help="register every project below a control root first")
     attach.add_argument("--scan-only", action="store_true", help="only register projects found below --control-dir")
@@ -64,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     repair = subparsers.add_parser("repair-attachment", help="repair local attachment artifacts")
     _location(repair)
-    repair.add_argument("--workspace", default=".")
+    repair.add_argument("--workspace", required=True, help="repository or worktree root to attach; never defaults to the current directory")
     repair.add_argument("--workspace-id")
     _registry(repair)
 
@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     register.add_argument("--role", required=True, choices=("design", "exploration", "implementation", "verification", "techlead-review"))
     register.add_argument("--work-item", action="append", required=True, dest="work_items")
-    register.add_argument("--workspace", default=".")
+    register.add_argument("--workspace", required=True, help="repository or worktree root to attach; never defaults to the current directory")
     register.add_argument("--workspace-id")
     register.add_argument("--title")
     register.add_argument("--note", default="")
@@ -196,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("--scan-only requires --control-dir")
                 result = {"registered_projects": registered}
             else:
+                if not args.workspace:
+                    raise ValueError("attach requires --workspace unless --scan-only is given")
                 result = attach_workspace(
                     args.project or args.location,
                     args.workspace,
