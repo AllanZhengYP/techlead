@@ -1,8 +1,30 @@
 # Tech Lead Agent
 
-A local-first design-review bar-raiser and durable work-item log for Codex,
-Claude Code, and Kiro. Tech Lead is explicitly invoked; implementation and
-independent verification remain in the user's tools and sessions of choice.
+Give your coding agents a technical lead.
+
+AI coding tools are good at completing focused tasks, but complex engineering
+work rarely fits cleanly into one prompt or one session. Designs evolve,
+implementation gets split across agents, important decisions disappear into
+chat history, and “done” can mean something different to every participant.
+
+Tech Lead Agent adds a durable coordination layer for that work. It helps you:
+
+- challenge a design before implementation begins;
+- turn approved designs into explicit, reviewable work items;
+- preserve decisions and context across sessions, worktrees, and coding tools;
+- track implementation and verification without pretending they are the same;
+- surface contradictions and unfinished parent work before they get buried;
+- resume the original Codex, Claude Code, or Kiro session when more work is
+  needed.
+
+Tech Lead Agent does not replace engineering judgment or autonomously manage
+your team. You invoke it at important decision points, remain in control of
+every state transition, and use your preferred agents for implementation and
+verification.
+
+The result is a lightweight technical-lead workflow: durable enough for
+multi-session projects, explicit enough to audit, and portable across Codex,
+Claude Code, and Kiro.
 
 The product behavior is defined by the [vision](.designs/vision.md),
 [high-level design](.designs/high-level-design.md), and
@@ -23,6 +45,54 @@ Codex invokes them as `$review-work`, `$create-work-item`, and `$work-log`.
 Claude Code invokes `/techlead:review-work`, `/techlead:create-work-item`, and
 `/techlead:work-log`. Kiro invokes `/review-work`, `/create-work-item`, and
 `/work-log`. Implicit invocation is rejected by each skill.
+
+## A tiny example: defeat the duplicate-email gremlin
+
+Suppose you want to send an email after every successful payment.
+
+First, create the work log:
+
+```text
+/work-log Initialize a project for reliable payment confirmation emails.
+```
+
+Then submit the design for review:
+
+```text
+/review-work WI-001
+
+When payment succeeds, publish an event. A worker consumes it and sends the
+confirmation email.
+```
+
+Tech Lead spots the lurking gremlin:
+
+> What prevents a retried event from sending the same email twice?
+
+You update the design to use an idempotency key. Once approved, split the work:
+
+```text
+/create-work-item Under WI-001, create an implementation item for the
+idempotent email worker.
+
+/create-work-item Under WI-001, create a verification item covering retries
+and duplicate delivery.
+```
+
+Your coding agents implement and verify the two items. Later, ask:
+
+```text
+/work-log What should we do next?
+```
+
+Instead of reconstructing the project from old chats, you get the approved
+design, current work, review obligations, and resumable sessions.
+
+One gremlin contained. One design decision preserved.
+
+The example uses Kiro commands. Codex uses `$review-work`,
+`$create-work-item`, and `$work-log`; Claude Code uses the corresponding
+`/techlead:*` commands.
 
 ## Plugin artifacts
 
