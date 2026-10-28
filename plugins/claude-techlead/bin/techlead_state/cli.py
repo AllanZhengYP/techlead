@@ -98,8 +98,8 @@ def build_parser() -> argparse.ArgumentParser:
     register.add_argument(
         "--provider-session-id",
         help=(
-            "real resumable provider session UUID; auto-detected for the current Codex or Claude Code "
-            "session, and never generated"
+            "real resumable provider session ID (Kiro uses sess_<UUID>); auto-detected for the current "
+            "Codex or Claude Code session, and never generated"
         ),
     )
     register.add_argument("--role", required=True, choices=("design", "exploration", "implementation", "verification", "techlead-review"))

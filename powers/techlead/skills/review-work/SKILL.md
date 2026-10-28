@@ -17,8 +17,8 @@ platform-equivalent Python 3 command).
 
 Resolve and validate the canonical project. Register or reuse a dedicated
 `techlead-review` session; never relabel another session role. For Kiro CLI,
-use provider `kiro-cli` and the exact UUID reported by `/session-id`; never
-invent a provider session ID. Inspect the named `WORK.md`, active revision,
+use provider `kiro-cli` and the exact `sess_<UUID>` ID reported by `/session-id`;
+never invent a provider session ID. Inspect the named `WORK.md`, active revision,
 parent and child verdicts, source design or outcome, and only the linked context
 used for the decision.
 

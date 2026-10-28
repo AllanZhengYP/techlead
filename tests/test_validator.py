@@ -72,7 +72,7 @@ class ValidatorConformanceTests(unittest.TestCase):
             codes = {issue.code for issue in validate_project(root).issues}
         self.assertIn("state.active_revision", codes)
 
-    def test_known_provider_session_id_must_be_real_uuid(self) -> None:
+    def test_known_provider_session_id_must_match_provider_format(self) -> None:
         records = copy_scenario("session-continuity")
         session = next(metadata for path, metadata, _body in records if path.startswith("sessions/"))
         session["provider_session_id"] = "made-up-session"

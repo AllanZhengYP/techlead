@@ -6,7 +6,7 @@
   "properties": {
     "session": {"type": "string", "pattern": "^SES-[0-9]{3,}$", "description": "Internal Tech Lead record ID only; never pass this value to a provider resume command."},
     "provider": {"type": "string", "minLength": 1},
-    "provider_session_id": {"type": "string", "minLength": 1, "description": "Provider-owned resumable session ID. Codex, Claude Code, and Kiro CLI records require the real session UUID."},
+    "provider_session_id": {"type": "string", "minLength": 1, "description": "Provider-owned resumable session ID. Codex and Claude Code use UUIDs; Kiro CLI uses sess_<UUID>."},
     "role": {"enum": ["design", "exploration", "implementation", "verification", "techlead-review"]},
     "status": {"enum": ["active", "paused"]},
     "work_items": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^WI-[0-9]{3,}$"}, "uniqueItems": true},

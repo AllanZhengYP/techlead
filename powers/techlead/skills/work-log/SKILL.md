@@ -22,8 +22,8 @@ one or more `(action, work item)` pairs, each with its `WORK.md` entry point and
 reason. Explain why any parallel group is non-colliding; do not invent
 dependency edges.
 
-For Kiro CLI session registration, use provider `kiro-cli` and the exact UUID
-reported by `/session-id`; never invent a provider session ID.
+For Kiro CLI session registration, use provider `kiro-cli` and the exact
+`sess_<UUID>` ID reported by `/session-id`; never invent a provider session ID.
 
 Keep `.techlead` symlinks, workspace links, local mappings, locks, and snapshots
 untracked. Git branch and revision are optional session hints. Never stage or

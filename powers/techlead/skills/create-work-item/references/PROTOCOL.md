@@ -62,11 +62,12 @@ work items.
 `session` is an internal `SES-NNN` record key and is never a provider resume
 identifier. `provider_session_id` is the provider-owned ID used to resume the
 original context. For `codex`, `claude-code`, and `kiro-cli` it must be the real,
-non-nil UUID exposed by that host; the helper rejects descriptive, generated, or
-internal IDs. Current Codex and Claude Code sessions are discovered from their
-tool-subprocess environments. Kiro CLI exposes the UUID through `/session-id`.
-When the host cannot expose the ID, registration must wait for the human to
-supply it; Tech Lead never fabricates one.
+provider-formatted ID exposed by that host: a non-nil UUID for Codex and Claude
+Code, and `sess_<UUID>` for Kiro CLI. The helper rejects descriptive, generated,
+or internal IDs. Current Codex and Claude Code sessions are discovered from
+their tool-subprocess environments. Kiro CLI exposes its ID through
+`/session-id`. When the host cannot expose the ID, registration must wait for
+the human to supply it; Tech Lead never fabricates one.
 
 ## State and revision invariants
 

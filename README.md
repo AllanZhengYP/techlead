@@ -79,9 +79,10 @@ symlinks, mappings, locks, and workspace links are excluded from Git.
 
 ## Record a resumable provider session
 
-`provider_session_id` is the actual provider-owned UUID, not the internal
-`SES-NNN` record key. For the current Codex or Claude Code session, omit the ID
-and let the helper read `CODEX_THREAD_ID` or `CLAUDE_CODE_SESSION_ID`:
+`provider_session_id` is the actual provider-owned resumable ID, not the
+internal `SES-NNN` record key. For the current Codex or Claude Code session,
+omit the ID and let the helper read `CODEX_THREAD_ID` or
+`CLAUDE_CODE_SESSION_ID`:
 
 ```sh
 tools/techlead-state register-session /path/to/service-workspace \
@@ -91,9 +92,9 @@ tools/techlead-state register-session /path/to/service-workspace \
 ```
 
 For Kiro CLI, run `/session-id` in the original Kiro session and pass that exact
-UUID with `--provider-session-id`. Registration rejects non-UUID values for
-Codex, Claude Code, and Kiro CLI, and `status` returns a ready-to-use
-provider-specific `resume_command`.
+`sess_<UUID>` value with `--provider-session-id`. Registration validates each
+provider's ID format, and `status` returns a ready-to-use provider-specific
+`resume_command`.
 
 Use the explicit provider skill for semantic review. The deterministic
 `apply-review` command exists for the skill to persist a human-authorized

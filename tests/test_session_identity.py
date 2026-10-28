@@ -20,14 +20,22 @@ class SessionIdentityTests(unittest.TestCase):
         self.assertEqual(resolved, session_id)
         self.assertEqual(resume_command("claude-code", resolved), f"claude --resume {session_id}")
 
-    def test_kiro_uuid_produces_exact_resume_command(self) -> None:
-        session_id = "f2946a26-3735-4b08-8d05-c928010302d5"
+    def test_kiro_prefixed_uuid_produces_exact_resume_command(self) -> None:
+        session_id = "sess_242d0d4f-37eb-4c9f-b479-6b36266dd9e8"
         resolved = resolve_provider_session_id("kiro-cli", session_id, environ={})
         self.assertEqual(resolved, session_id)
         self.assertEqual(
             resume_command("kiro-cli", resolved),
             f"kiro-cli chat --resume-id {session_id}",
         )
+
+    def test_kiro_rejects_an_unprefixed_uuid(self) -> None:
+        with self.assertRaisesRegex(SessionIdentityError, "expected sess_<UUID>"):
+            resolve_provider_session_id(
+                "kiro-cli",
+                "242d0d4f-37eb-4c9f-b479-6b36266dd9e8",
+                environ={},
+            )
 
     def test_missing_known_provider_id_is_never_generated(self) -> None:
         with self.assertRaisesRegex(SessionIdentityError, "never generates provider session IDs"):

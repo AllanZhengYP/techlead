@@ -20,11 +20,12 @@ attach or repair the supplied workspace, and one session may cover several work
 items. Git branch and revision are optional hints. Local symlinks, mappings,
 locks, and snapshots must remain untracked.
 
-For `register-session`, record only the provider's real resumable session UUID.
+For `register-session`, record only the provider's real resumable session ID.
 Never invent, summarize, or substitute a session ID, and never use the internal
 `SES-NNN` record ID as a provider ID. Omit `--provider-session-id` to read the
 current Codex UUID from `CODEX_THREAD_ID` or the current Claude Code UUID from
 `CLAUDE_CODE_SESSION_ID`. For Kiro CLI, have the human run `/session-id` in the
-original session and pass that exact UUID. If the real ID is unavailable, stop
-and request it instead of registering a session. Return the recorded UUID and
-provider-specific `resume_command` so the human can resume the original context.
+original session and pass that exact `sess_<UUID>` ID. If the real ID is
+unavailable, stop and request it instead of registering a session. Return the
+recorded ID and provider-specific `resume_command` so the human can resume the
+original context.

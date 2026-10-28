@@ -319,7 +319,7 @@ class ProtocolOperationsTests(unittest.TestCase):
 
     def test_known_provider_rejects_made_up_session_id(self) -> None:
         root = self.initialize()
-        with self.assertRaisesRegex(OperationError, "not a kiro-cli session UUID"):
+        with self.assertRaisesRegex(OperationError, "expected sess_<UUID>"):
             register_session(
                 root,
                 provider="kiro-cli",
@@ -329,6 +329,21 @@ class ProtocolOperationsTests(unittest.TestCase):
                 workspace=self.workspace,
                 registry_path=self.registry,
             )
+
+    def test_kiro_prefixed_session_id_is_registered_and_resumable(self) -> None:
+        root = self.initialize()
+        session_id = "sess_242d0d4f-37eb-4c9f-b479-6b36266dd9e8"
+        result = register_session(
+            root,
+            provider="kiro-cli",
+            provider_session_id=session_id,
+            role="implementation",
+            work_items=["WI-001"],
+            workspace=self.workspace,
+            registry_path=self.registry,
+        )
+        self.assertEqual(result["provider_session_id"], session_id)
+        self.assertEqual(result["resume_command"], f"kiro-cli chat --resume-id {session_id}")
 
     def test_custom_provider_keeps_opaque_session_id(self) -> None:
         root = self.initialize()

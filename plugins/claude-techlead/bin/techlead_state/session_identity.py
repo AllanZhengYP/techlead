@@ -8,7 +8,8 @@ import shlex
 import uuid
 
 
-UUID_PROVIDERS = frozenset({"claude", "claude-code", "codex", "kiro", "kiro-cli"})
+UUID_PROVIDERS = frozenset({"claude", "claude-code", "codex"})
+KIRO_PROVIDERS = frozenset({"kiro", "kiro-cli"})
 
 _SESSION_ID_ENV = {
     "claude": "CLAUDE_CODE_SESSION_ID",
@@ -67,22 +68,36 @@ def resolve_provider_session_id(
 
 
 def validate_provider_session_id(provider: str, value: str, *, source: str = "record") -> str:
-    """Validate and canonicalize session IDs for providers whose IDs are UUIDs."""
+    """Validate and canonicalize session IDs with provider-defined formats."""
 
     normalized_provider = provider.strip().lower()
-    if normalized_provider not in UUID_PROVIDERS:
+    if normalized_provider not in UUID_PROVIDERS | KIRO_PROVIDERS:
         return value
+    uuid_value = value
+    if normalized_provider in KIRO_PROVIDERS:
+        if not isinstance(value, str) or not value.startswith("sess_"):
+            hint = _DISCOVERY_HINT[normalized_provider]
+            raise SessionIdentityError(
+                f"{source} is not a valid {provider} session ID: {value!r}; "
+                f"expected sess_<UUID>; {hint}. Do not use an invented ID or the "
+                "internal SES-NNN record ID"
+            )
+        uuid_value = value.removeprefix("sess_")
     try:
-        parsed = uuid.UUID(value)
+        parsed = uuid.UUID(uuid_value)
     except (AttributeError, TypeError, ValueError) as exc:
         hint = _DISCOVERY_HINT[normalized_provider]
+        expected = "sess_<UUID>" if normalized_provider in KIRO_PROVIDERS else "UUID"
         raise SessionIdentityError(
-            f"{source} is not a {provider} session UUID: {value!r}; {hint}. "
+            f"{source} is not a valid {provider} session ID: {value!r}; expected {expected}; {hint}. "
             "Do not use an invented ID or the internal SES-NNN record ID"
         ) from exc
     if parsed.int == 0:
-        raise SessionIdentityError(f"{source} must not be the nil UUID")
-    return str(parsed)
+        raise SessionIdentityError(f"{source} must not contain the nil UUID")
+    canonical_uuid = str(parsed)
+    if normalized_provider in KIRO_PROVIDERS:
+        return f"sess_{canonical_uuid}"
+    return canonical_uuid
 
 
 def resume_command(provider: str, provider_session_id: str) -> str | None:
